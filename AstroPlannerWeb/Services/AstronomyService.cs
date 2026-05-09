@@ -187,6 +187,9 @@ public static class AstronomyService
                 lon = AASNeptune.EclipticLongitude(jd, false);
                 lat = AASNeptune.EclipticLatitude(jd, false);
                 break;
+            case SolarSystemBodyType.Moon:
+                var (mRa, mDec, _) = GetMoonPosition(utc);
+                return (mRa, mDec);
             default:
                 return GetSunPosition(utc);
         }

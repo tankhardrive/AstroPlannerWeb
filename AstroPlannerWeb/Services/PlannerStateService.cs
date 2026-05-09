@@ -2,12 +2,19 @@ using AstroPlannerWeb.Models;
 
 namespace AstroPlannerWeb.Services;
 
-public record PlannerRow(
-    DeepSkyObject Object,
-    VisibilityWindow Window,
-    double Score,
-    ObjectAnnotation? Annotation,
-    double? BestFillPct);
+public record PlannerRow
+{
+    public DeepSkyObject?      Object      { get; init; }
+    public SolarSystemObject?  SolarObject { get; init; }
+    public VisibilityWindow    Window      { get; init; } = VisibilityWindow.NeverVisible;
+    public double              Score       { get; init; }
+    public ObjectAnnotation?   Annotation  { get; init; }
+    public double?             BestFillPct { get; init; }
+
+    public bool   IsSolarSystem => SolarObject != null;
+    public string RowName       => SolarObject?.Name ?? Object?.Name ?? "";
+    public string DisplayName   => SolarObject?.Name ?? Object?.DisplayName ?? "";
+}
 
 public record NightInfo(DateTime DarkStart, DateTime DarkEnd, double MoonIllum);
 
@@ -43,5 +50,7 @@ public class PlannerStateService
     public DateOnly? CachedDate => _rows.Count > 0 ? _date : null;
 
     public PlannerRow? GetRow(string objectName)
-        => _rows.FirstOrDefault(r => r.Object.Name == objectName);
+        => _rows.FirstOrDefault(r =>
+            (r.Object?.Name == objectName) ||
+            (r.SolarObject?.Name == objectName));
 }

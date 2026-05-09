@@ -12,7 +12,7 @@
     {
         <div class="obj-loading">Loading…</div>
     }
-    else if (_obj == null)
+    else if (_obj == null && _solarObj == null)
     {
         <div class="obj-not-found">
             <button class="back-btn" @onclick="Close">✕ Close</button>
@@ -24,21 +24,38 @@
         <div class="obj-header-row">
             <button class="back-btn" @onclick="Close">✕ Close</button>
             <div class="obj-actions">
-                <button class="action-btn @(_isFavorite ? "action-fav-on" : "")" @onclick="ToggleFavorite">
-                    @(_isFavorite ? "♥" : "♡") Favorite
-                </button>
-                @if (_imagedOn.HasValue)
+                @if (_obj != null)
                 {
-                    <button class="action-btn action-imaged" @onclick="ClearImaged">
-                        ✓ Imaged @_imagedOn.Value.ToString("yyyy-MM-dd")
+                    <button class="action-btn @(_isFavorite ? "action-fav-on" : "")" @onclick="ToggleFavorite">
+                        @(_isFavorite ? "♥" : "♡") Favorite
                     </button>
+                    @if (_editingImaged)
+                    {
+                        <div class="imaged-editor">
+                            <input type="date" class="imaged-date-input"
+                                   value="@_imagedOnEdit"
+                                   @onchange="e => _imagedOnEdit = e.Value?.ToString() ?? _imagedOnEdit" />
+                            <button class="action-btn action-imaged" @onclick="SaveImaged">Save</button>
+                            @if (_imagedOn.HasValue)
+                            {
+                                <button class="action-btn" @onclick="ClearImaged">Clear</button>
+                            }
+                            <button class="action-btn" @onclick="() => _editingImaged = false">Cancel</button>
+                        </div>
+                    }
+                    else if (_imagedOn.HasValue)
+                    {
+                        <button class="action-btn action-imaged" @onclick="StartEditImaged">
+                            ✓ Imaged @_imagedOn.Value.ToString("yyyy-MM-dd")
+                        </button>
+                    }
+                    else
+                    {
+                        <button class="action-btn" @onclick="StartEditImaged">Mark Imaged</button>
+                    }
+                    <button class="action-btn action-link" @onclick="OpenAladin">Aladin</button>
+                    <a class="action-btn action-link" href="@_astroBinUrl" target="_blank" rel="noreferrer">AstroBin</a>
                 }
-                else
-                {
-                    <button class="action-btn" @onclick="MarkImaged">Mark Imaged</button>
-                }
-                <button class="action-btn action-link" @onclick="OpenAladin">Aladin</button>
-                <a class="action-btn action-link" href="@_astroBinUrl" target="_blank" rel="noreferrer">AstroBin</a>
             </div>
         </div>
 
@@ -46,8 +63,16 @@
             <!-- Main column: title, visibility, chart, catalog, score -->
             <div class="obj-main-col">
                 <div class="obj-title-block">
-                    <h2 class="obj-name">@_obj.DisplayName</h2>
-                    <span class="obj-meta">@_obj.CatalogIds · @_obj.Type.ToDisplayString() · @_obj.Constellation</span>
+                    @if (_obj != null)
+                    {
+                        <h2 class="obj-name">@_obj.DisplayName</h2>
+                        <span class="obj-meta">@_obj.CatalogIds · @_obj.Type.ToDisplayString() · @_obj.Constellation</span>
+                    }
+                    else
+                    {
+                        <h2 class="obj-name">@_solarObj!.Name</h2>
+                        <span class="obj-meta">@(_solarObj.BodyType == SolarSystemBodyType.Moon ? "Natural Satellite" : "Solar System · Planet")</span>
+                    }
                 </div>
 
                 <div class="vis-summary-bar">
@@ -128,7 +153,7 @@
                     </div>
                 }
 
-                @if (_yearlyScores != null)
+                @if (_yearlyScores != null && _obj != null)
                 {
                     <div class="yearly-heatmap">
                         <div class="detail-section-header">Best Months — @_date.Year</div>
@@ -146,6 +171,28 @@
                 }
 
                 <div class="obj-detail-columns">
+                    @if (_solarObj != null)
+                    {
+                        <div class="obj-catalog-info">
+                            <div class="detail-section-header">Object Info</div>
+                            <div class="catalog-grid">
+                                <span class="cg-label">Body</span>
+                                <span class="cg-value">@_solarObj.BodyType</span>
+                                @if (_vis?.IsVisible == true)
+                                {
+                                    <span class="cg-label">Peak Altitude</span>
+                                    <span class="cg-value">@((int)_vis.PeakAltitudeDegrees)° at @FormatLocalTime(_vis.PeakTime)</span>
+                                    @if (_solarObj.BodyType != SolarSystemBodyType.Moon)
+                                    {
+                                        <span class="cg-label">Moon Sep.</span>
+                                        <span class="cg-value">@((int)_vis.MoonSeparationDegrees)°</span>
+                                    }
+                                }
+                            </div>
+                        </div>
+                    }
+                    @if (_obj != null)
+                    {
                     <div class="obj-catalog-info">
                         <div class="detail-section-header">Catalog</div>
                         <div class="catalog-grid">
@@ -189,8 +236,9 @@
                             <span class="cg-value">@FormatDec(_obj.DecDegrees)</span>
                         </div>
                     </div>
+                    }
 
-                    @if (_breakdown != null)
+                    @if (_breakdown != null && _obj != null)
                     {
                         <div class="obj-score-breakdown">
                             <div class="detail-section-header">Score Breakdown</div>
@@ -256,7 +304,9 @@
                 </div>
             </div>
 
-            <!-- Right sidebar: survey image + setup cards -->
+            <!-- Right sidebar: survey image + setup cards (DSO only) -->
+            @if (_obj != null)
+            {
             <div class="obj-right-col">
                 <div class="obj-survey-wrap" id="survey-wrap">
                     <img class="obj-survey-img" src="@_surveyImageUrl"
@@ -292,6 +342,7 @@
                     </div>
                 }
             </div>
+            }
         </div>
     }
 </div>
@@ -321,7 +372,8 @@
     [Parameter] public EventCallback OnClose { get; set; }
     [Parameter] public EventCallback<string> OnAnnotationChanged { get; set; }
 
-    DeepSkyObject? _obj;
+    DeepSkyObject?     _obj;
+    SolarSystemObject? _solarObj;
     AppSettings? _settings;
     ObservationLocation? _location;
     VisibilityWindow? _vis;
@@ -329,6 +381,8 @@
     List<SetupFovResult> _fovResults = [];
     bool _isFavorite;
     DateOnly? _imagedOn;
+    bool _editingImaged;
+    string _imagedOnEdit = "";
     bool _loading = true;
     DateOnly _date;
 
@@ -355,8 +409,8 @@
         if (ObjectName == _loadedName) return;
         _loadedName = ObjectName;
 
-        _obj = null; _vis = null; _breakdown = null; _yearlyScores = null;
-        _fovResults = []; _isFavorite = false; _imagedOn = null;
+        _obj = null; _solarObj = null; _vis = null; _breakdown = null; _yearlyScores = null;
+        _fovResults = []; _isFavorite = false; _imagedOn = null; _editingImaged = false; _imagedOnEdit = "";
         _loading = true; _visWindow = ""; _astroBinUrl = "#"; _surveyImageUrl = "";
         _samples = []; _fullCurvePoints = ""; _segsBright = []; _horizonPoints = "";
         _nowXStr = null; _timeLabels = []; _showAladin = false; _aladinNeedsInit = false;
@@ -365,62 +419,97 @@
         _location = _settings.GetActiveLocation();
         await CatalogService.EnsureLoadedAsync();
 
-        _obj = CatalogService.GetAll().FirstOrDefault(o => o.Name == ObjectName);
-        if (_obj == null) { _loading = false; return; }
-
         _date = PlannerState.CachedDate ?? DateOnly.FromDateTime(DateTime.Today);
 
-        var cached = PlannerState.GetRow(_obj.Name);
-        if (cached != null)
+        // Try DSO first, then solar system
+        _obj = CatalogService.GetAll().FirstOrDefault(o => o.Name == ObjectName);
+
+        if (_obj != null)
         {
-            _vis = cached.Window;
+            // ── DSO path ──────────────────────────────────────────────────────
+            var cached = PlannerState.GetRow(_obj.Name);
+            if (cached != null)
+            {
+                _vis = cached.Window;
+            }
+            else if (_location != null)
+            {
+                var site = _location.ToSite();
+                var (darkStart, darkEnd) = AstronomyService.GetAstronomicalDarkness(_date, site);
+                var midNight = darkStart + (darkEnd - darkStart) / 2;
+                var (moonRa, moonDec, moonIllum) = AstronomyService.GetMoonPosition(midNight);
+                int step = _settings.VisibilityStepMinutes;
+                var tList = new List<DateTime>();
+                for (var t = darkStart; t <= darkEnd; t = t.AddMinutes(step))
+                    tList.Add(t);
+                var arr = tList.ToArray();
+                var lst = AstronomyService.ComputeLstHours(arr, site.LongitudeDegrees);
+                _vis = VisibilityService.ComputeDsoFast(
+                    _obj, darkStart, darkEnd, arr, lst,
+                    site.LatitudeDegrees, _location.Horizon, step,
+                    (moonRa, moonDec, moonIllum));
+            }
+
+            _breakdown = _vis != null ? VisibilityScorer.ComputeBreakdown(_obj, _vis, _location?.BortleClass) : null;
+
+            if (_settings.Annotations.TryGetValue(_obj.Name, out var ann))
+            {
+                _isFavorite = ann.IsFavorite;
+                _imagedOn = ann.ImagedOn;
+            }
+
+            if (_obj.MajorAxisArcmin is double maj && maj > 0 && _settings.ImagingSetups.Count > 0)
+                _fovResults = SetupFovResult.Compute(_settings.ImagingSetups, maj);
+
+            _visWindow   = BuildVisWindow();
+            _astroBinUrl = $"https://www.astrobin.com/search/?q={Uri.EscapeDataString(_obj.DisplayName)}";
+
+            double fovDeg = Math.Min(Math.Max((_obj.MajorAxisArcmin ?? 20) * 2.5, 20), 120) / 60.0;
+            _surveyImageUrl = "https://alasky.cds.unistra.fr/hips-image-services/hips2fits" +
+                "?hips=CDS%2FP%2FDSS2%2Fcolor" +
+                $"&ra={_obj.RaDegrees.ToString("F4", CultureInfo.InvariantCulture)}" +
+                $"&dec={_obj.DecDegrees.ToString("F4", CultureInfo.InvariantCulture)}" +
+                $"&fov={fovDeg.ToString("F3", CultureInfo.InvariantCulture)}" +
+                "&width=400&height=400&format=jpg&projection=TAN&coordsys=icrs";
+
+            if (_location != null)
+            {
+                _samples = VisibilityService.GetAltitudeSamples(
+                    _ => (_obj.RaDegrees, _obj.DecDegrees),
+                    _date, _location.ToSite(), _location.Horizon, 5);
+                _yearlyScores = VisibilityService.ComputeYearlyScores(_obj, _location, _date.Year);
+            }
         }
-        else if (_location != null)
+        else
         {
-            var site = _location.ToSite();
-            var (darkStart, darkEnd) = AstronomyService.GetAstronomicalDarkness(_date, site);
-            var midNight = darkStart + (darkEnd - darkStart) / 2;
-            var (moonRa, moonDec, moonIllum) = AstronomyService.GetMoonPosition(midNight);
-            int step = _settings.VisibilityStepMinutes;
-            var tList = new List<DateTime>();
-            for (var t = darkStart; t <= darkEnd; t = t.AddMinutes(step))
-                tList.Add(t);
-            var arr = tList.ToArray();
-            var lst = AstronomyService.ComputeLstHours(arr, site.LongitudeDegrees);
-            _vis = VisibilityService.ComputeDsoFast(
-                _obj, darkStart, darkEnd, arr, lst,
-                site.LatitudeDegrees, _location.Horizon, step,
-                (moonRa, moonDec, moonIllum));
-        }
+            // ── Solar system path ─────────────────────────────────────────────
+            _solarObj = SolarSystemObject.CreateDefaults().FirstOrDefault(p => p.Name == ObjectName);
+            if (_solarObj == null) { _loading = false; return; }
 
-        _breakdown = _vis != null ? VisibilityScorer.ComputeBreakdown(_obj, _vis) : null;
+            var cached = PlannerState.GetRow(_solarObj.Name);
+            if (cached != null)
+            {
+                _vis = cached.Window;
+            }
+            else if (_location != null)
+            {
+                var site = _location.ToSite();
+                var (darkStart, darkEnd) = AstronomyService.GetAstronomicalDarkness(_date, site);
+                var midNight = darkStart + (darkEnd - darkStart) / 2;
+                var (moonRa, moonDec, moonIllum) = AstronomyService.GetMoonPosition(midNight);
+                _vis = VisibilityService.ComputeSolarSystem(
+                    _solarObj, _date, site, _location.Horizon, _settings.VisibilityStepMinutes,
+                    (moonRa, moonDec, moonIllum));
+            }
 
-        if (_settings.Annotations.TryGetValue(_obj.Name, out var ann))
-        {
-            _isFavorite = ann.IsFavorite;
-            _imagedOn = ann.ImagedOn;
-        }
+            _visWindow = BuildVisWindow();
 
-        if (_obj.MajorAxisArcmin is double maj && maj > 0 && _settings.ImagingSetups.Count > 0)
-            _fovResults = SetupFovResult.Compute(_settings.ImagingSetups, maj);
-
-        _visWindow   = BuildVisWindow();
-        _astroBinUrl = $"https://www.astrobin.com/search/?q={Uri.EscapeDataString(_obj.DisplayName)}";
-
-        double fovDeg = Math.Min(Math.Max((_obj.MajorAxisArcmin ?? 20) * 2.5, 20), 120) / 60.0;
-        _surveyImageUrl = "https://alasky.cds.unistra.fr/hips-image-services/hips2fits" +
-            "?hips=CDS%2FP%2FDSS2%2Fcolor" +
-            $"&ra={_obj.RaDegrees.ToString("F4", CultureInfo.InvariantCulture)}" +
-            $"&dec={_obj.DecDegrees.ToString("F4", CultureInfo.InvariantCulture)}" +
-            $"&fov={fovDeg.ToString("F3", CultureInfo.InvariantCulture)}" +
-            "&width=400&height=400&format=jpg&projection=TAN&coordsys=icrs";
-
-        if (_location != null)
-        {
-            _samples = VisibilityService.GetAltitudeSamples(
-                _ => (_obj.RaDegrees, _obj.DecDegrees),
-                _date, _location.ToSite(), _location.Horizon, 5);
-            _yearlyScores = VisibilityService.ComputeYearlyScores(_obj, _location, _date.Year);
+            if (_location != null)
+            {
+                _samples = VisibilityService.GetAltitudeSamples(
+                    t => AstronomyService.GetPlanetPosition(_solarObj.BodyType, t),
+                    _date, _location.ToSite(), _location.Horizon, 5);
+            }
         }
 
         BuildChartData();
@@ -580,18 +669,30 @@
         await SaveAnnotation();
     }
 
-    private async Task MarkImaged()
+    private void StartEditImaged()
+    {
+        _imagedOnEdit = (_imagedOn ?? DateOnly.FromDateTime(DateTime.Today)).ToString("yyyy-MM-dd");
+        _editingImaged = true;
+    }
+
+    private async Task SaveImaged()
     {
         if (_obj == null || _settings == null) return;
-        _imagedOn = DateOnly.FromDateTime(DateTime.Today);
-        GetOrCreateAnnotation(_obj.Name).ImagedOn = _imagedOn;
-        await SaveAnnotation();
+        if (DateOnly.TryParseExact(_imagedOnEdit, "yyyy-MM-dd",
+                CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var d))
+        {
+            _imagedOn = d;
+            GetOrCreateAnnotation(_obj.Name).ImagedOn = _imagedOn;
+            await SaveAnnotation();
+        }
+        _editingImaged = false;
     }
 
     private async Task ClearImaged()
     {
         if (_obj == null || _settings == null) return;
         _imagedOn = null;
+        _editingImaged = false;
         GetOrCreateAnnotation(_obj.Name).ImagedOn = null;
         await SaveAnnotation();
     }

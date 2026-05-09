@@ -1,0 +1,223 @@
+@page "/log"
+@inject SettingsService SettingsService
+@inject CatalogService CatalogService
+
+<PageTitle>Observation Log — AstroPlanner</PageTitle>
+
+<div class="log-page">
+    <div class="log-header">
+        <span class="log-title">Observation Log</span>
+        <span class="log-counts">
+            @if (_imaged.Count > 0)
+            {
+                <span>@_imaged.Count imaged</span>
+                <span class="log-sep">·</span>
+            }
+            @if (_favorites.Count > 0)
+            {
+                <span>@_favorites.Count favorites</span>
+            }
+        </span>
+    </div>
+
+    <div class="log-list-container">
+        @if (_loading)
+        {
+            <p class="log-empty">Loading…</p>
+        }
+        else if (_imaged.Count == 0 && _favorites.Count == 0)
+        {
+            <p class="log-empty">No observations yet. Mark objects as imaged or favorite from the planner.</p>
+        }
+        else
+        {
+            @if (_imaged.Count > 0)
+            {
+                <div class="log-section-header">Imaged</div>
+                <div class="log-list-header">
+                    <button class="col-hdr @(_imagedSort == "Name"  ? "col-hdr-active" : "")" @onclick='() => SortImaged("Name")'  >Object       @IArrow("Name")</button>
+                    <button class="col-hdr @(_imagedSort == "Type"  ? "col-hdr-active" : "")" @onclick='() => SortImaged("Type")'  >Type         @IArrow("Type")</button>
+                    <button class="col-hdr @(_imagedSort == "Const" ? "col-hdr-active" : "")" @onclick='() => SortImaged("Const")' >Constellation @IArrow("Const")</button>
+                    <button class="col-hdr @(_imagedSort == "Mag"   ? "col-hdr-active" : "")" @onclick='() => SortImaged("Mag")'   >Mag          @IArrow("Mag")</button>
+                    <button class="col-hdr @(_imagedSort == "Date"  ? "col-hdr-active" : "")" @onclick='() => SortImaged("Date")'  >Date Imaged  @IArrow("Date")</button>
+                </div>
+                @foreach (var row in _imaged)
+                {
+                    <div class="log-row @(_selectedName == row.Name ? "row-selected" : "")"
+                         @onclick="() => SelectObject(row.Name)">
+                        <span class="log-name">
+                            <span>@row.DisplayName</span>
+                            @if (row.DisplayName != row.ShortName)
+                            {
+                                <span class="log-ids">@row.ShortName</span>
+                            }
+                        </span>
+                        <span class="log-type">@row.Type.ToShortString()</span>
+                        <span class="log-const">@row.Constellation</span>
+                        <span class="log-mag">@(row.DisplayMagnitude < 99 ? row.DisplayMagnitude.ToString("F1") : "–")</span>
+                        <span class="log-date">@row.ImagedOn!.Value.ToString("yyyy-MM-dd")</span>
+                    </div>
+                }
+            }
+
+            @if (_favorites.Count > 0)
+            {
+                <div class="log-section-header" style="margin-top: @(_imaged.Count > 0 ? "18px" : "0")">Favorites</div>
+                <div class="log-list-header log-list-header-fav">
+                    <button class="col-hdr @(_favSort == "Name"  ? "col-hdr-active" : "")" @onclick='() => SortFav("Name")'  >Object       @FArrow("Name")</button>
+                    <button class="col-hdr @(_favSort == "Type"  ? "col-hdr-active" : "")" @onclick='() => SortFav("Type")'  >Type         @FArrow("Type")</button>
+                    <button class="col-hdr @(_favSort == "Const" ? "col-hdr-active" : "")" @onclick='() => SortFav("Const")' >Constellation @FArrow("Const")</button>
+                    <button class="col-hdr @(_favSort == "Mag"   ? "col-hdr-active" : "")" @onclick='() => SortFav("Mag")'   >Mag          @FArrow("Mag")</button>
+                    <button class="col-hdr @(_favSort == "Size"  ? "col-hdr-active" : "")" @onclick='() => SortFav("Size")'  >Size         @FArrow("Size")</button>
+                </div>
+                @foreach (var row in _favorites)
+                {
+                    <div class="log-row log-row-fav @(_selectedName == row.Name ? "row-selected" : "")"
+                         @onclick="() => SelectObject(row.Name)">
+                        <span class="log-name">
+                            <span class="fav-icon">♥</span>
+                            <span>@row.DisplayName</span>
+                            @if (row.DisplayName != row.ShortName)
+                            {
+                                <span class="log-ids">@row.ShortName</span>
+                            }
+                        </span>
+                        <span class="log-type">@row.Type.ToShortString()</span>
+                        <span class="log-const">@row.Constellation</span>
+                        <span class="log-mag">@(row.DisplayMagnitude < 99 ? row.DisplayMagnitude.ToString("F1") : "–")</span>
+                        <span class="log-mag">@row.SizeDisplay</span>
+                    </div>
+                }
+            }
+        }
+    </div>
+
+    @if (_selectedName != null)
+    {
+        <div class="planner-detail-panel">
+            <ObjectDetail ObjectName="@_selectedName"
+                          OnClose="() => _selectedName = null"
+                          OnAnnotationChanged="HandleAnnotationChanged" />
+        </div>
+    }
+</div>
+
+@code {
+    record LogEntry(string Name, string DisplayName, string ShortName, ObjectType Type,
+        string Constellation, double DisplayMagnitude, string SizeDisplay, DateOnly? ImagedOn);
+
+    bool _loading = true;
+    List<LogEntry> _imaged    = [];
+    List<LogEntry> _favorites = [];
+    string? _selectedName;
+
+    string _imagedSort = "Date";
+    bool   _imagedAsc  = false;   // newest first by default
+
+    string _favSort = "Name";
+    bool   _favAsc  = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var settings = await SettingsService.LoadAsync();
+        await CatalogService.EnsureLoadedAsync();
+        BuildLists(settings);
+        _loading = false;
+    }
+
+    private void BuildLists(AppSettings settings)
+    {
+        var catalog = CatalogService.GetAll().ToDictionary(o => o.Name);
+        var imaged    = new List<LogEntry>();
+        var favorites = new List<LogEntry>();
+
+        foreach (var (name, ann) in settings.Annotations)
+        {
+            if (!catalog.TryGetValue(name, out var obj)) continue;
+            var entry = new LogEntry(obj.Name, obj.DisplayName, obj.ShortName,
+                obj.Type, obj.Constellation, obj.DisplayMagnitude, obj.SizeDisplay, ann.ImagedOn);
+
+            if (ann.ImagedOn.HasValue)
+                imaged.Add(entry);
+            else if (ann.IsFavorite)
+                favorites.Add(entry);
+        }
+
+        _imaged    = imaged;
+        _favorites = favorites;
+        ApplySortImaged();
+        ApplySortFav();
+    }
+
+    private void SortImaged(string col)
+    {
+        if (_imagedSort == col)
+            _imagedAsc = !_imagedAsc;
+        else
+        {
+            _imagedSort = col;
+            _imagedAsc  = col is "Name" or "Type" or "Const";
+        }
+        ApplySortImaged();
+    }
+
+    private void ApplySortImaged()
+    {
+        _imaged = (_imagedSort, _imagedAsc) switch
+        {
+            ("Name",  true)  => [.. _imaged.OrderBy(e => e.DisplayName)],
+            ("Name",  false) => [.. _imaged.OrderByDescending(e => e.DisplayName)],
+            ("Type",  true)  => [.. _imaged.OrderBy(e => e.Type.ToShortString())],
+            ("Type",  false) => [.. _imaged.OrderByDescending(e => e.Type.ToShortString())],
+            ("Const", true)  => [.. _imaged.OrderBy(e => e.Constellation)],
+            ("Const", false) => [.. _imaged.OrderByDescending(e => e.Constellation)],
+            ("Mag",   true)  => [.. _imaged.OrderBy(e => e.DisplayMagnitude)],
+            ("Mag",   false) => [.. _imaged.OrderByDescending(e => e.DisplayMagnitude)],
+            ("Date",  true)  => [.. _imaged.OrderBy(e => e.ImagedOn)],
+            ("Date",  false) => [.. _imaged.OrderByDescending(e => e.ImagedOn)],
+            _                => _imaged,
+        };
+    }
+
+    private void SortFav(string col)
+    {
+        if (_favSort == col)
+            _favAsc = !_favAsc;
+        else
+        {
+            _favSort = col;
+            _favAsc  = col is "Name" or "Type" or "Const";
+        }
+        ApplySortFav();
+    }
+
+    private void ApplySortFav()
+    {
+        _favorites = (_favSort, _favAsc) switch
+        {
+            ("Name",  true)  => [.. _favorites.OrderBy(e => e.DisplayName)],
+            ("Name",  false) => [.. _favorites.OrderByDescending(e => e.DisplayName)],
+            ("Type",  true)  => [.. _favorites.OrderBy(e => e.Type.ToShortString())],
+            ("Type",  false) => [.. _favorites.OrderByDescending(e => e.Type.ToShortString())],
+            ("Const", true)  => [.. _favorites.OrderBy(e => e.Constellation)],
+            ("Const", false) => [.. _favorites.OrderByDescending(e => e.Constellation)],
+            ("Mag",   true)  => [.. _favorites.OrderBy(e => e.DisplayMagnitude)],
+            ("Mag",   false) => [.. _favorites.OrderByDescending(e => e.DisplayMagnitude)],
+            ("Size",  true)  => [.. _favorites.OrderBy(e => e.SizeDisplay)],
+            ("Size",  false) => [.. _favorites.OrderByDescending(e => e.SizeDisplay)],
+            _                => _favorites,
+        };
+    }
+
+    private string IArrow(string col) => _imagedSort != col ? "" : _imagedAsc ? " ▲" : " ▼";
+    private string FArrow(string col) => _favSort    != col ? "" : _favAsc    ? " ▲" : " ▼";
+
+    private void SelectObject(string name)
+        => _selectedName = _selectedName == name ? null : name;
+
+    private async Task HandleAnnotationChanged(string objectName)
+    {
+        var settings = await SettingsService.LoadAsync();
+        BuildLists(settings);
+    }
+}

@@ -27,8 +27,14 @@
         <div class="control-group search-group">
             <input type="search" @bind="_searchText" @bind:event="oninput"
                    @bind:after="ApplyFilter" placeholder="Search objects..." />
+            @if (_searchText.Length > 0)
+            {
+                <button class="search-clear-btn" @onclick="ClearSearch">✕</button>
+            }
         </div>
-        <button class="recalc-btn" @onclick="Recalculate" disabled="@_loading">↻ Recalculate</button>
+        <div class="recalc-group">
+            <button class="recalc-btn" @onclick="Recalculate" disabled="@_loading">↻ Recalculate</button>
+        </div>
     </div>
 
     <!-- Type filter chips -->
@@ -80,31 +86,33 @@
         <button class="col-hdr @SortClass("Score")"   @onclick='() => SortBy("Score")'  >Score   @SortArrow("Score")</button>
         <button class="col-hdr @SortClass("Visible")" @onclick='() => SortBy("Visible")'>Visible @SortArrow("Visible")</button>
         <button class="col-hdr @SortClass("Fill")"    @onclick='() => SortBy("Fill")'   >Fill    @SortArrow("Fill")</button>
+        <button class="col-hdr @SortClass("Imaged")" @onclick='() => SortBy("Imaged")'>Imaged  @SortArrow("Imaged")</button>
     </div>
 
     <!-- Virtualized object list -->
     <div class="obj-list-container">
         <Virtualize Items="_filteredRows" Context="row" ItemSize="36">
-            <div class="obj-row @(row.Window.IsVisible ? "" : "not-visible") @(row.Annotation?.IsFavorite == true ? "favorite" : "") @(_selectedName == row.Object.Name ? "row-selected" : "")"
-                 @onclick="() => SelectObject(row.Object.Name)">
+            <div class="obj-row @(row.Window.IsVisible ? "" : "not-visible") @(row.Annotation?.IsFavorite == true ? "favorite" : "") @(row.IsSolarSystem ? "row-solar" : "") @(_selectedName == row.RowName ? "row-selected" : "")"
+                 @onclick="() => SelectObject(row.RowName)">
                 <span class="col-name">
                     @if (row.Annotation?.IsFavorite == true)
                     {
                         <span class="fav-icon">♥</span>
                     }
-                    <span>@row.Object.DisplayName</span>
-                    @if (row.Object.DisplayName != row.Object.ShortName)
+                    <span>@row.DisplayName</span>
+                    @if (row.Object != null && row.Object.DisplayName != row.Object.ShortName)
                     {
                         <span class="catalog-ids">@row.Object.ShortName</span>
                     }
                 </span>
-                <span class="col-type">@row.Object.Type.ToShortString()</span>
-                <span class="col-const">@row.Object.Constellation</span>
-                <span class="col-mag">@(row.Object.DisplayMagnitude < 99 ? row.Object.DisplayMagnitude.ToString("F1") : "–")</span>
-                <span class="col-size">@row.Object.SizeDisplay</span>
+                <span class="col-type">@(row.Object?.Type.ToShortString() ?? (row.SolarObject?.BodyType == SolarSystemBodyType.Moon ? "Moon" : "Planet"))</span>
+                <span class="col-const">@(row.Object?.Constellation ?? "–")</span>
+                <span class="col-mag">@(row.Object != null ? (row.Object.DisplayMagnitude < 99 ? row.Object.DisplayMagnitude.ToString("F1") : "–") : "–")</span>
+                <span class="col-size">@(row.Object?.SizeDisplay ?? "–")</span>
                 <span class="col-score @VisibilityScorer.ScoreCssClass(row.Score)">@VisibilityScorer.ScoreDisplay(row.Score)</span>
                 <span class="col-visible">@(row.Window.IsVisible ? FormatDuration(row.Window.Duration) : "–")</span>
                 <span class="col-fill @(row.BestFillPct > 100 ? "fill-over" : "")">@(row.BestFillPct.HasValue ? $"{row.BestFillPct.Value:F0}%" : "–")</span>
+                <span class="col-imaged @(row.Annotation?.ImagedOn.HasValue == true ? "imaged-yes" : "")">@(row.Annotation?.ImagedOn.HasValue == true ? "✓" : "–")</span>
             </div>
         </Virtualize>
     </div>
@@ -148,12 +156,13 @@
 
     private static readonly Dictionary<string, ObjectType[]> TypeGroups = new()
     {
-        ["Galaxy"]    = [ObjectType.Galaxy, ObjectType.GalaxyPair, ObjectType.GalaxyTriplet, ObjectType.GalaxyGroup],
-        ["Cluster"]   = [ObjectType.GlobularCluster, ObjectType.OpenCluster, ObjectType.ClusterNebula, ObjectType.StellarAssociation],
-        ["Nebula"]    = [ObjectType.EmissionNebula, ObjectType.ReflectionNebula, ObjectType.HiiRegion,
-                         ObjectType.BrightNebula, ObjectType.Nebula, ObjectType.DarkNebula],
-        ["Planetary"] = [ObjectType.PlanetaryNebula],
-        ["SNR"]       = [ObjectType.SupernovaRemnant],
+        ["Galaxy"]       = [ObjectType.Galaxy, ObjectType.GalaxyPair, ObjectType.GalaxyTriplet, ObjectType.GalaxyGroup],
+        ["Cluster"]      = [ObjectType.GlobularCluster, ObjectType.OpenCluster, ObjectType.ClusterNebula, ObjectType.StellarAssociation],
+        ["Nebula"]       = [ObjectType.EmissionNebula, ObjectType.ReflectionNebula, ObjectType.HiiRegion,
+                            ObjectType.BrightNebula, ObjectType.Nebula, ObjectType.DarkNebula],
+        ["Planetary"]    = [ObjectType.PlanetaryNebula],
+        ["SNR"]          = [ObjectType.SupernovaRemnant],
+        ["Solar System"] = [],
     };
 
     protected override async Task OnInitializedAsync()
@@ -208,6 +217,12 @@
     private void ToggleFavorites()
     {
         _favoritesOnly = !_favoritesOnly;
+        ApplyFilter();
+    }
+
+    private void ClearSearch()
+    {
+        _searchText = "";
         ApplyFilter();
     }
 
@@ -267,8 +282,9 @@
             var lstHours  = AstronomyService.ComputeLstHours(timeSteps, site.LongitudeDegrees);
 
             const int batchSize = 500;
-            var rows = new List<PlannerRow>(catalog.Count);
+            var rows = new List<PlannerRow>(catalog.Count + 8);
             var usableSetups = _settings!.ImagingSetups.Where(FovCalculator.IsUsable).ToList();
+            int? bortle = location.BortleClass;
 
             for (int i = 0; i < catalog.Count; i += batchSize)
             {
@@ -281,7 +297,7 @@
                     var window = VisibilityService.ComputeDsoFast(
                         obj, darkStart, darkEnd, timeSteps, lstHours,
                         site.LatitudeDegrees, horizon, step, moonInfo);
-                    var score = VisibilityScorer.ComputeScore(obj, window);
+                    var score = VisibilityScorer.ComputeScore(obj, window, bortle);
                     _settings!.Annotations.TryGetValue(obj.Name, out var ann);
                     double? fill = null;
                     if (usableSetups.Count > 0 && obj.MajorAxisArcmin is double maj && maj > 0)
@@ -289,7 +305,7 @@
                         var best = FovCalculator.BestSetup(usableSetups, maj);
                         if (best != null) fill = FovCalculator.FillPercent(best, maj);
                     }
-                    rows.Add(new PlannerRow(obj, window, score, ann, fill));
+                    rows.Add(new PlannerRow { Object = obj, Window = window, Score = score, Annotation = ann, BestFillPct = fill });
                 }
 
                 _computedCount = end;
@@ -297,12 +313,21 @@
                 StateHasChanged();
             }
 
+            // Solar system objects
+            foreach (var planet in SolarSystemObject.CreateDefaults())
+            {
+                ct.ThrowIfCancellationRequested();
+                var window = VisibilityService.ComputeSolarSystem(planet, _selectedDate, site, horizon, step, moonInfo);
+                var score  = VisibilityScorer.ComputePlanetScore(window);
+                rows.Add(new PlannerRow { SolarObject = planet, Window = window, Score = score });
+            }
+
             ct.ThrowIfCancellationRequested();
 
             _allRows = [.. rows
                 .OrderByDescending(r => r.Score)
                 .ThenByDescending(r => r.Window.IsVisible)
-                .ThenBy(r => r.Object.DisplayMagnitude)];
+                .ThenBy(r => r.Object?.DisplayMagnitude ?? 0)];
 
             PlannerState.Store(_selectedDate, _activeLocationName, _allRows, _nightInfo);
 
@@ -322,9 +347,24 @@
     {
         var q = _searchText.Trim();
 
+        bool anySolarSelected = _activeTypeGroups.Contains("Solar System");
+        bool anyDsoSelected   = _activeTypeFilter.Count > 0;
+        bool anyGroupActive   = anyDsoSelected || anySolarSelected;
+
         var filtered = _allRows.Where(r =>
         {
-            if (_activeTypeFilter.Count > 0 && !_activeTypeFilter.Contains(r.Object.Type))
+            if (r.IsSolarSystem)
+            {
+                if (anyGroupActive && !anySolarSelected) return false;
+                if (_favoritesOnly) return false;
+                if (_visibleOnly && !r.Window.IsVisible) return false;
+                if (q.Length > 0 && !r.DisplayName.Contains(q, StringComparison.OrdinalIgnoreCase))
+                    return false;
+                return true;
+            }
+
+            // DSO
+            if (anyGroupActive && (!anyDsoSelected || !_activeTypeFilter.Contains(r.Object!.Type)))
                 return false;
 
             if (_visibleOnly && !r.Window.IsVisible)
@@ -336,7 +376,7 @@
             if (q.Length > 0)
             {
                 bool hit =
-                    r.Object.Name.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                    r.Object!.Name.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                     (r.Object.CommonName?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
                     (r.Object.MessierNumber.HasValue &&
                      $"M{r.Object.MessierNumber}".Contains(q, StringComparison.OrdinalIgnoreCase)) ||
@@ -356,20 +396,22 @@
     private IEnumerable<PlannerRow> ApplySort(IEnumerable<PlannerRow> rows) =>
         (_sortColumn, _sortAscending) switch
         {
-            ("Name",    true)  => rows.OrderBy(r => r.Object.DisplayName),
-            ("Name",    false) => rows.OrderByDescending(r => r.Object.DisplayName),
-            ("Type",    true)  => rows.OrderBy(r => r.Object.Type.ToDisplayString()),
-            ("Type",    false) => rows.OrderByDescending(r => r.Object.Type.ToDisplayString()),
-            ("Const",   true)  => rows.OrderBy(r => r.Object.Constellation),
-            ("Const",   false) => rows.OrderByDescending(r => r.Object.Constellation),
-            ("Mag",     true)  => rows.OrderBy(r => r.Object.DisplayMagnitude),
-            ("Mag",     false) => rows.OrderByDescending(r => r.Object.DisplayMagnitude),
-            ("Size",    true)  => rows.OrderBy(r => r.Object.MajorAxisArcmin ?? 0),
-            ("Size",    false) => rows.OrderByDescending(r => r.Object.MajorAxisArcmin ?? 0),
+            ("Name",    true)  => rows.OrderBy(r => r.DisplayName),
+            ("Name",    false) => rows.OrderByDescending(r => r.DisplayName),
+            ("Type",    true)  => rows.OrderBy(r => r.Object?.Type.ToDisplayString() ?? r.SolarObject?.BodyType.ToString()),
+            ("Type",    false) => rows.OrderByDescending(r => r.Object?.Type.ToDisplayString() ?? r.SolarObject?.BodyType.ToString()),
+            ("Const",   true)  => rows.OrderBy(r => r.Object?.Constellation ?? ""),
+            ("Const",   false) => rows.OrderByDescending(r => r.Object?.Constellation ?? ""),
+            ("Mag",     true)  => rows.OrderBy(r => r.Object?.DisplayMagnitude ?? r.SolarObject?.Magnitude ?? 99),
+            ("Mag",     false) => rows.OrderByDescending(r => r.Object?.DisplayMagnitude ?? r.SolarObject?.Magnitude ?? 99),
+            ("Size",    true)  => rows.OrderBy(r => r.Object?.MajorAxisArcmin ?? r.SolarObject?.AngularDiameterArcmin ?? 0),
+            ("Size",    false) => rows.OrderByDescending(r => r.Object?.MajorAxisArcmin ?? r.SolarObject?.AngularDiameterArcmin ?? 0),
             ("Visible", true)  => rows.OrderBy(r => r.Window.Duration),
             ("Visible", false) => rows.OrderByDescending(r => r.Window.Duration),
             ("Fill",    true)  => rows.OrderBy(r => r.BestFillPct ?? double.MaxValue),
             ("Fill",    false) => rows.OrderByDescending(r => r.BestFillPct ?? -1),
+            ("Imaged",  true)  => rows.OrderBy(r => r.Annotation?.ImagedOn.HasValue == true),
+            ("Imaged",  false) => rows.OrderByDescending(r => r.Annotation?.ImagedOn.HasValue == true),
             (_,         true)  => rows.OrderBy(r => r.Score),
             (_,         false) => rows.OrderByDescending(r => r.Score),
         };
@@ -403,7 +445,7 @@
         _settings = await SettingsService.LoadAsync();
         for (int i = 0; i < _allRows.Count; i++)
         {
-            if (_allRows[i].Object.Name != objectName) continue;
+            if (_allRows[i].Object?.Name != objectName) continue;
             _settings.Annotations.TryGetValue(objectName, out var ann);
             _allRows[i] = _allRows[i] with { Annotation = ann };
             break;
