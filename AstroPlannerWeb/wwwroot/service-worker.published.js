@@ -51,5 +51,18 @@ async function onFetch(event) {
         cachedResponse = await cache.match(request);
     }
 
-    return cachedResponse || fetch(event.request);
+    const response = cachedResponse || await fetch(event.request);
+
+    // Cloudflare Pages redirects /index.html → /. Browsers reject redirected responses
+    // served by a service worker for navigation requests ("Response served by service
+    // worker has redirections"). Clone the response without the redirect flag.
+    if (response.redirected) {
+        return new Response(response.body, {
+            status: response.status,
+            statusText: response.statusText,
+            headers: response.headers,
+        });
+    }
+
+    return response;
 }
