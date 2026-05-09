@@ -1,0 +1,205 @@
+@page "/calendar"
+@inject SettingsService SettingsService
+@using AstroPlannerWeb.Models
+@using AstroPlannerWeb.Services
+@using System.Globalization
+
+<PageTitle>Calendar — AstroPlanner</PageTitle>
+
+<div class="cal-page page">
+    @if (_settings == null)
+    {
+        <p class="settings-loading">Loading…</p>
+    }
+    else
+    {
+        <div class="cal-toolbar">
+            <button class="cal-nav-btn" @onclick="PrevMonth">‹</button>
+            <span class="cal-month-title">@_viewDate.ToString("MMMM yyyy", CultureInfo.InvariantCulture)</span>
+            <button class="cal-nav-btn" @onclick="NextMonth">›</button>
+            @if (_viewDate.Year != DateTime.Today.Year || _viewDate.Month != DateTime.Today.Month)
+            {
+                <button class="cal-today-btn" @onclick="GoToday">Today</button>
+            }
+            @if (_location != null)
+            {
+                <span class="cal-location-lbl">@_location.Name</span>
+            }
+        </div>
+
+        @if (_location == null)
+        {
+            <div class="cal-empty-state">Configure a location in Settings to see darkness forecasts.</div>
+        }
+        else
+        {
+            <div class="cal-scroll">
+                <div class="cal-grid">
+                    @foreach (var h in _dayHeaders)
+                    {
+                        <div class="cal-dow-hdr">@h</div>
+                    }
+                    @foreach (var cell in _cells)
+                    {
+                        @if (cell == null)
+                        {
+                            <div class="cal-cell cal-padding"></div>
+                        }
+                        else
+                        {
+                            <div class="cal-cell @(cell.IsToday ? "cal-today" : "")" style="background:@cell.BgColor">
+                                <div class="cal-cell-top">
+                                    <span class="cal-day-num @(cell.IsToday ? "cal-day-today" : "")">@cell.Date.Day</span>
+                                </div>
+                                <div class="cal-cell-mid">
+                                    <span class="cal-moon-icon" title="Moon @((int)Math.Round(cell.MoonIllum * 100))% illuminated">@cell.MoonIcon</span>
+                                    <span class="cal-moon-pct @MoonPctClass(cell.MoonIllum)">@((int)Math.Round(cell.MoonIllum * 100))%</span>
+                                </div>
+                                <div class="cal-cell-bot">
+                                    @if (cell.DarknessHours > 0)
+                                    {
+                                        <span class="cal-dark-h" title="Astronomical darkness">@cell.DarknessHours.ToString("F1", CultureInfo.InvariantCulture)h dark</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="cal-dark-h cal-nodark">no astro dark</span>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    }
+                </div>
+
+                <div class="cal-legend">
+                    <span class="cal-legend-title">Night quality:</span>
+                    <span class="cal-legend-item"><span class="cal-swatch" style="background:#0a2010"></span>Excellent</span>
+                    <span class="cal-legend-item"><span class="cal-swatch" style="background:#0c1c0e"></span>Good</span>
+                    <span class="cal-legend-item"><span class="cal-swatch" style="background:#131510"></span>Fair</span>
+                    <span class="cal-legend-item"><span class="cal-swatch" style="background:#180c0a"></span>Poor</span>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    AppSettings? _settings;
+    ObservationLocation? _location;
+    DateOnly _viewDate;
+    List<CalendarCell?> _cells = [];
+
+    static readonly string[] _dayHeaders = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+    private record CalendarCell(
+        DateOnly Date,
+        double DarknessHours,
+        double MoonIllum,   // 0-1
+        string MoonIcon,
+        string BgColor,
+        bool IsToday);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _settings = await SettingsService.LoadAsync();
+        _location = _settings.GetActiveLocation();
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        _viewDate = new DateOnly(today.Year, today.Month, 1);
+        BuildCalendar();
+    }
+
+    private void PrevMonth() { _viewDate = _viewDate.AddMonths(-1); BuildCalendar(); }
+    private void NextMonth() { _viewDate = _viewDate.AddMonths(1);  BuildCalendar(); }
+    private void GoToday()
+    {
+        var t = DateOnly.FromDateTime(DateTime.Today);
+        _viewDate = new DateOnly(t.Year, t.Month, 1);
+        BuildCalendar();
+    }
+
+    private void BuildCalendar()
+    {
+        _cells = [];
+        if (_location == null) return;
+
+        var site = _location.ToSite();
+        var tz   = _location.GetTimeZone();
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        int daysInMonth = DateTime.DaysInMonth(_viewDate.Year, _viewDate.Month);
+
+        // Blank padding cells so the 1st lands on the right weekday column (Sun=0)
+        int startDow = (int)_viewDate.DayOfWeek;
+        for (int i = 0; i < startDow; i++)
+            _cells.Add(null);
+
+        double prevIllum = GetMoonIllum(_viewDate.AddDays(-1), tz);
+
+        for (int d = 1; d <= daysInMonth; d++)
+        {
+            var date = new DateOnly(_viewDate.Year, _viewDate.Month, d);
+            var (darkStart, darkEnd) = AstronomyService.GetAstronomicalDarkness(date, site);
+            double rawHours = darkEnd > darkStart ? (darkEnd - darkStart).TotalHours : 0;
+            // Treat very short windows as no darkness (binary search noise when sun never hits -18°)
+            double darknessHours = rawHours >= 0.5 ? rawHours : 0;
+
+            double illum = GetMoonIllum(date, tz);
+            bool waxing  = illum >= prevIllum;
+
+            _cells.Add(new CalendarCell(
+                Date:           date,
+                DarknessHours:  darknessHours,
+                MoonIllum:      illum,
+                MoonIcon:       MoonPhaseIcon(illum, waxing),
+                BgColor:        NightQualityColor(illum, darknessHours),
+                IsToday:        date == today));
+
+            prevIllum = illum;
+        }
+    }
+
+    private static double GetMoonIllum(DateOnly date, TimeZoneInfo tz)
+    {
+        // Sample at 23:00 local — a stable proxy for "this night's moon"
+        var local2300 = new DateTime(date.Year, date.Month, date.Day, 23, 0, 0);
+        var utc = TimeZoneInfo.ConvertTimeToUtc(local2300, tz);
+        var (_, _, illumPct) = AstronomyService.GetMoonPosition(utc);
+        return illumPct / 100.0;
+    }
+
+    private static string MoonPhaseIcon(double illum, bool waxing)
+    {
+        if (illum < 0.03) return "🌑";
+        if (illum > 0.97) return "🌕";
+        if (waxing)
+        {
+            if (illum > 0.55) return "🌔";
+            if (illum > 0.45) return "🌓";
+            return "🌒";
+        }
+        if (illum > 0.55) return "🌖";
+        if (illum > 0.45) return "🌗";
+        return "🌘";
+    }
+
+    private static string NightQualityColor(double illum, double darknessHours)
+    {
+        if (darknessHours <= 0) return "#0c0c14";
+        double moonScore = 1.0 - illum;
+        double darkScore = Math.Min(darknessHours / 8.0, 1.0);
+        double q = moonScore * darkScore;
+        return q switch
+        {
+            > 0.65 => "#0a2010",
+            > 0.45 => "#0c1c0e",
+            > 0.25 => "#131510",
+            > 0.10 => "#181208",
+            _      => "#180c0a",
+        };
+    }
+
+    private static string MoonPctClass(double illum) => illum switch
+    {
+        > 0.55 => "moon-high",
+        > 0.25 => "moon-mid",
+        _      => "moon-low",
+    };
+}
