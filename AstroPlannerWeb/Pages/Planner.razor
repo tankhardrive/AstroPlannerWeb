@@ -334,7 +334,7 @@
 
             // Pre-warm the yearly cache in the background while the user browses
             _ = YearlyState.EnsureComputedAsync(
-                _selectedDate.Year, _activeLocationName, _settings!, CatalogService, VisibilityService);
+                _selectedDate.Year, _activeLocationName, _settings!, CatalogService);
 
             _loading = false;
             ApplyFilter();

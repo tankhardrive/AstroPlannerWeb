@@ -1335,6 +1335,15 @@ main  { flex: 1; min-height: 0; display: flex; flex-direction: column; }
     display: flex;
     flex-direction: column;
     overflow-x: auto;
+    overflow-y: hidden;
+}
+
+.yearly-inner {
+    min-width: 640px;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
 }
 
 .yearly-list-header,
@@ -1345,7 +1354,6 @@ main  { flex: 1; min-height: 0; display: flex; flex-direction: column; }
     align-items: center;
     padding: 0 8px;
     gap: 2px;
-    min-width: 640px;
 }
 
 .yearly-list-header {
@@ -1364,6 +1372,7 @@ main  { flex: 1; min-height: 0; display: flex; flex-direction: column; }
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .yearly-row {

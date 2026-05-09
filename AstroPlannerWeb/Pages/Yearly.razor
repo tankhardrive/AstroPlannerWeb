@@ -1,7 +1,6 @@
 @page "/yearly"
 @inject CatalogService CatalogService
 @inject SettingsService SettingsService
-@inject VisibilityService VisibilityService
 @inject YearlyStateService YearlyState
 @implements IDisposable
 
@@ -48,6 +47,10 @@
             </button>
         }
         <label class="filter-check">
+            <input type="checkbox" @bind="_visibleOnly" @bind:after="ApplyFilter" />
+            Visible
+        </label>
+        <label class="filter-check">
             <input type="checkbox" @bind="_imagedOnly" @bind:after="ApplyFilter" />
             Imaged only
         </label>
@@ -67,6 +70,7 @@
 
     <!-- Heatmap table -->
     <div class="yearly-table-wrap">
+      <div class="yearly-inner">
         <div class="yearly-list-header">
             <button class="col-hdr @SortClass(-1)" @onclick='() => SortBy(-1)'>Object @SortArrow(-1)</button>
             @for (int m = 0; m < 12; m++)
@@ -107,6 +111,7 @@
                 </Virtualize>
             }
         </div>
+      </div>
     </div>
 
     @if (_selectedName != null)
@@ -125,6 +130,7 @@
     string _locationName = "";
     int    _year = DateTime.Today.Year;
     string _searchText = "";
+    bool   _visibleOnly = true;
     bool   _imagedOnly;
 
     readonly HashSet<ObjectType> _activeTypeFilter = [];
@@ -154,7 +160,7 @@
         _settings = await SettingsService.LoadAsync();
         _locationName = _settings.ActiveLocationName;
         YearlyState.OnChanged += HandleStateChanged;
-        await YearlyState.EnsureComputedAsync(_year, _locationName, _settings, CatalogService, VisibilityService);
+        await YearlyState.EnsureComputedAsync(_year, _locationName, _settings, CatalogService);
         if (!YearlyState.IsComputing)
             ApplyFilter();
     }
@@ -178,7 +184,7 @@
     {
         _filteredRows = [];
         StateHasChanged();
-        await YearlyState.EnsureComputedAsync(_year, _locationName, _settings!, CatalogService, VisibilityService);
+        await YearlyState.EnsureComputedAsync(_year, _locationName, _settings!, CatalogService);
         if (!YearlyState.IsComputing)
             ApplyFilter();
     }
@@ -225,6 +231,9 @@
 
         if (_activeTypeFilter.Count > 0)
             filtered = filtered.Where(r => _activeTypeFilter.Contains(r.Object.Type));
+
+        if (_visibleOnly)
+            filtered = filtered.Where(r => r.Scores.Any(s => s > 0));
 
         if (_imagedOnly)
             filtered = filtered.Where(r => r.Annotation?.ImagedOn.HasValue == true);
