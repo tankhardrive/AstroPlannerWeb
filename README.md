@@ -2,7 +2,7 @@
   <h1>AstroPlanner Web</h1>
   <p>A horizon-aware deep sky object planner for visual observers and astrophotographers — now in the browser.</p>
 
-  [![Live App](https://img.shields.io/badge/live-astroplannerweb.pages.dev-blue)](https://astroplannerweb.pages.dev)
+  [![Live App](https://img.shields.io/badge/live-planner.njastro.cc-blue)](https://planner.njastro.cc)
   [![Deploy](https://img.shields.io/github/actions/workflow/status/tankhardrive/AstroPlannerWeb/deploy.yml?label=deploy)](https://github.com/tankhardrive/AstroPlannerWeb/actions)
   [![.NET](https://img.shields.io/badge/.NET-10-purple)](https://dotnet.microsoft.com)
   [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -13,7 +13,7 @@
 
 A browser-based port of [AstroPlanner](https://github.com/tankhardrive/AstroPlanner), the cross-platform desktop app. Runs entirely client-side with no server required — install it as a PWA and it works offline.
 
-**[→ Open the app](https://astroplannerweb.pages.dev)**
+**[→ Open the app](https://planner.njastro.cc)**
 
 ---
 
