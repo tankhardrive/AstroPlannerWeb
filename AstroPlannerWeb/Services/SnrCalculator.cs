@@ -71,7 +71,10 @@ public static class SnrCalculator
 
         double sbSky      = BortleToSkyBrightness(bortle.Value);
         double signalRate = F0 * Math.Pow(10, -sbObj / 2.5) * apertureM2 * qe * pixelSolidAngle;
-        double skyRate    = F0 * Math.Pow(10, -sbSky  / 2.5) * apertureM2 * qe * pixelSolidAngle;
+        // Narrowband filters reject continuum sky glow proportional to bandwidth / 300 nm broadband baseline.
+        // Signal is left unchanged — assumes the target emits in the selected passband.
+        double skyRejection = setup.FilterBandwidthNm / 300.0;
+        double skyRate    = F0 * Math.Pow(10, -sbSky  / 2.5) * apertureM2 * qe * pixelSolidAngle * skyRejection;
 
         if (signalRate <= 0) return null;
 

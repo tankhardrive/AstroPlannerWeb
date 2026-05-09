@@ -323,7 +323,14 @@
                         {
                             var snr = idx < _snrEstimates.Count ? _snrEstimates[idx] : null;
                             <div class="setup-card @(r.IsBest ? "setup-card-best" : "")">
-                                <div class="setup-card-name">@(r.IsBest ? "★ " : "")@r.GearLabel</div>
+                                <div class="setup-card-name">
+                                    @(r.IsBest ? "★ " : "")@r.GearLabel
+                                    @{ var setup = _settings!.ImagingSetups[idx]; }
+                                    @if (setup.Filter != FilterType.Broadband)
+                                    {
+                                        <span class="setup-card-filter">@setup.FilterLabel</span>
+                                    }
+                                </div>
                                 <div class="setup-card-row">
                                     <div class="setup-card-field">
                                         <span class="setup-card-lbl">Plate Scale</span>

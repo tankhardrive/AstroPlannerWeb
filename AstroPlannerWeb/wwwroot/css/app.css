@@ -498,6 +498,17 @@ main  { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
 .setup-card-best .setup-card-name { color: #8ab4f8; }
 
+.setup-card-filter {
+    font-size: 0.62rem;
+    color: #c06030;
+    background: #1e1008;
+    border: 1px solid #3a2010;
+    border-radius: 3px;
+    padding: 0 4px;
+    margin-left: 5px;
+    vertical-align: middle;
+}
+
 .setup-card-row {
     display: flex;
     justify-content: space-between;
