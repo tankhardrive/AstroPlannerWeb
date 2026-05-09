@@ -542,6 +542,13 @@ main  { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .snr-good      { color: #4890b0; }
 .snr-excellent { color: #50c880; }
 
+.snr-bright-warn {
+    color: #b08030;
+    font-size: 0.65rem;
+    margin-left: 3px;
+    cursor: default;
+}
+
 /* Title block */
 .obj-title-block { margin-bottom: 2px; }
 .obj-name { color: #a0c0f8; font-size: 1.3rem; margin: 0 0 3px; }

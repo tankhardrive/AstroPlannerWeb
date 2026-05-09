@@ -341,7 +341,13 @@
                                 @if (snr != null)
                                 {
                                     <div class="setup-card-snr-row">
-                                        <span class="setup-card-lbl">Int. Time</span>
+                                        <span class="setup-card-lbl">
+                                            Int. Time
+                                            @if (snr.IsBrightCore)
+                                            {
+                                                <span class="snr-bright-warn" title="High surface brightness — times reflect the bright core only, not faint extended structures">⚠</span>
+                                            }
+                                        </span>
                                         <span class="setup-card-snr">
                                             <span class="snr-tier snr-min" title="Minimum (SNR @_settings!.SnrMinimum.ToString("F0"))">@SnrCalculator.FormatHours(snr.Minimum)</span>
                                             <span class="snr-sep">›</span>

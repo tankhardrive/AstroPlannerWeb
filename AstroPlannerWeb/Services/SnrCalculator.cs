@@ -2,7 +2,7 @@ using AstroPlannerWeb.Models;
 
 namespace AstroPlannerWeb.Services;
 
-public record SnrTimeEstimate(double? Minimum, double? Decent, double? Good, double? Excellent);
+public record SnrTimeEstimate(double Minimum, double Decent, double Good, double Excellent, bool IsBrightCore);
 
 public static class SnrCalculator
 {
@@ -23,70 +23,79 @@ public static class SnrCalculator
         _ => 17.0,
     };
 
-    private static double? EffectiveSb(DeepSkyObject obj)
+    // Returns (sb, isBrightCore) or null if the object type can't be estimated at all.
+    private static (double Sb, bool IsBrightCore)? EffectiveSb(DeepSkyObject obj)
     {
         if (obj.Type == ObjectType.OpenCluster) return null;
 
-        if (obj.SurfaceBrightness.HasValue)
-            return obj.SurfaceBrightness.Value;
+        double? sb = obj.SurfaceBrightness;
 
-        double? mag = obj.MagnitudeV ?? obj.MagnitudeB;
-        if (mag == null || mag >= 99) return null;
-        if (!obj.MajorAxisArcmin.HasValue || obj.MajorAxisArcmin.Value <= 0) return null;
+        if (sb == null)
+        {
+            double? mag = obj.MagnitudeV ?? obj.MagnitudeB;
+            if (mag == null || mag >= 99) return null;
+            if (!obj.MajorAxisArcmin.HasValue || obj.MajorAxisArcmin.Value <= 0) return null;
 
-        double aArcsec = obj.MajorAxisArcmin.Value * 60.0;
-        double bArcsec = (obj.MinorAxisArcmin ?? obj.MajorAxisArcmin.Value) * 60.0;
-        double areaArcsec2 = Math.PI * (aArcsec / 2.0) * (bArcsec / 2.0);
-        if (areaArcsec2 <= 0) return null;
+            double aArcsec = obj.MajorAxisArcmin.Value * 60.0;
+            double bArcsec = (obj.MinorAxisArcmin ?? obj.MajorAxisArcmin.Value) * 60.0;
+            double areaArcsec2 = Math.PI * (aArcsec / 2.0) * (bArcsec / 2.0);
+            if (areaArcsec2 <= 0) return null;
 
-        double sb = mag.Value + 2.5 * Math.Log10(areaArcsec2);
-        // Guard against point-source-like objects where derived SB would be unrealistically bright
-        return sb >= 10 ? sb : null;
+            sb = mag.Value + 2.5 * Math.Log10(areaArcsec2);
+        }
+
+        if (sb < 10) return null;
+
+        // SB < 18 means catalog size likely reflects the bright inner region, not faint extensions.
+        // Times will be correct for the core but not for capturing the full object.
+        return (sb.Value, sb < 18);
     }
 
     public static SnrTimeEstimate? Compute(ImagingSetup setup, DeepSkyObject obj, int? bortle, AppSettings settings)
     {
         if (!bortle.HasValue) return null;
 
-        double? sbObj = EffectiveSb(obj);
-        if (sbObj == null) return null;
+        var sbResult = EffectiveSb(obj);
+        if (sbResult == null) return null;
+        var (sbObj, isBrightCore) = sbResult.Value;
 
         if (setup.ApertureMm <= 0 || setup.FocalLengthMm <= 0 || setup.PixelSizeMicrons <= 0)
             return null;
 
-        double plateScale    = 206.265 * setup.PixelSizeMicrons / setup.FocalLengthMm;
+        double plateScale      = 206.265 * setup.PixelSizeMicrons / setup.FocalLengthMm;
         double pixelSolidAngle = plateScale * plateScale;
-        double apertureM2   = Math.PI * Math.Pow(setup.ApertureMm / 2000.0, 2);
-        double qe            = Math.Clamp(setup.QePercent, 1, 100) / 100.0;
-        double R             = Math.Max(setup.ReadNoiseElectrons, 0);
-        double tSub          = setup.SubExposureSeconds > 0 ? setup.SubExposureSeconds : 300.0;
+        double apertureM2      = Math.PI * Math.Pow(setup.ApertureMm / 2000.0, 2);
+        double qe              = Math.Clamp(setup.QePercent, 1, 100) / 100.0;
+        double R               = Math.Max(setup.ReadNoiseElectrons, 0);
+        double tSub            = setup.SubExposureSeconds > 0 ? setup.SubExposureSeconds : 300.0;
 
-        double sbSky     = BortleToSkyBrightness(bortle.Value);
-        double signalRate = F0 * Math.Pow(10, -sbObj.Value / 2.5) * apertureM2 * qe * pixelSolidAngle;
-        double skyRate    = F0 * Math.Pow(10, -sbSky        / 2.5) * apertureM2 * qe * pixelSolidAngle;
+        double sbSky      = BortleToSkyBrightness(bortle.Value);
+        double signalRate = F0 * Math.Pow(10, -sbObj / 2.5) * apertureM2 * qe * pixelSolidAngle;
+        double skyRate    = F0 * Math.Pow(10, -sbSky  / 2.5) * apertureM2 * qe * pixelSolidAngle;
 
         if (signalRate <= 0) return null;
 
         // Full CCD equation: SNR = S·sqrt(T) / sqrt(S + B + R²/t_sub)
         // Solved for T: T = SNR² · (S + B + R²/t_sub) / S²
         double noiseFactor = signalRate + skyRate + (R * R) / tSub;
-
         double Solve(double snr) => snr * snr * noiseFactor / (signalRate * signalRate) / 3600.0;
 
+        double minimum = Solve(settings.SnrMinimum);
+
+        // If even the minimum tier is < 30 min, flag as bright core regardless of SB threshold
         return new SnrTimeEstimate(
-            Minimum:   Solve(settings.SnrMinimum),
-            Decent:    Solve(settings.SnrDecent),
-            Good:      Solve(settings.SnrGood),
-            Excellent: Solve(settings.SnrExcellent));
+            Minimum:      minimum,
+            Decent:       Solve(settings.SnrDecent),
+            Good:         Solve(settings.SnrGood),
+            Excellent:    Solve(settings.SnrExcellent),
+            IsBrightCore: isBrightCore || minimum < 0.5);
     }
 
-    public static string FormatHours(double? hours)
+    public static string FormatHours(double hours)
     {
-        if (hours == null) return "–";
-        double h = hours.Value;
-        if (h < 1.0 / 60.0) return "<1m";
-        if (h < 1.0) return $"{(int)Math.Round(h * 60)}m";
-        if (h > 500) return ">500h";
-        return h < 10 ? $"{h:F1}h" : $"{(int)Math.Round(h)}h";
+        if (hours < 1.0 / 60.0) return "<1m";
+        if (hours < 1.0) return $"{(int)Math.Round(hours * 60)}m";
+        if (hours > 500) return ">500h";
+        return hours < 10 ? $"{hours:F1}h" : $"{(int)Math.Round(hours)}h";
     }
 }
