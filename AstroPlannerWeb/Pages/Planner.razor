@@ -382,6 +382,8 @@
             {
                 bool hit =
                     r.Object!.Name.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                    r.Object.ShortName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                    r.Object.DisplayName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                     (r.Object.CommonName?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
                     (r.Object.MessierNumber.HasValue &&
                      $"M{r.Object.MessierNumber}".Contains(q, StringComparison.OrdinalIgnoreCase)) ||
