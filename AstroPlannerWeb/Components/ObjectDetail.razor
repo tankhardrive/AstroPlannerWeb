@@ -319,8 +319,9 @@
                 {
                     <div class="setup-cards">
                         <div class="detail-section-header">Imaging Setups</div>
-                        @foreach (var r in _fovResults)
+                        @foreach (var (r, idx) in _fovResults.Select((r, i) => (r, i)))
                         {
+                            var snr = idx < _snrEstimates.Count ? _snrEstimates[idx] : null;
                             <div class="setup-card @(r.IsBest ? "setup-card-best" : "")">
                                 <div class="setup-card-name">@(r.IsBest ? "★ " : "")@r.GearLabel</div>
                                 <div class="setup-card-row">
@@ -337,6 +338,21 @@
                                     <span class="setup-card-lbl">FOV</span>
                                     <span class="setup-card-fov">@r.FovDisplay</span>
                                 </div>
+                                @if (snr != null)
+                                {
+                                    <div class="setup-card-snr-row">
+                                        <span class="setup-card-lbl">Int. Time</span>
+                                        <span class="setup-card-snr">
+                                            <span class="snr-tier snr-min" title="Minimum (SNR @_settings!.SnrMinimum.ToString("F0"))">@SnrCalculator.FormatHours(snr.Minimum)</span>
+                                            <span class="snr-sep">›</span>
+                                            <span class="snr-tier snr-decent" title="Decent (SNR @_settings!.SnrDecent.ToString("F0"))">@SnrCalculator.FormatHours(snr.Decent)</span>
+                                            <span class="snr-sep">›</span>
+                                            <span class="snr-tier snr-good" title="Good (SNR @_settings!.SnrGood.ToString("F0"))">@SnrCalculator.FormatHours(snr.Good)</span>
+                                            <span class="snr-sep">›</span>
+                                            <span class="snr-tier snr-excellent" title="Excellent (SNR @_settings!.SnrExcellent.ToString("F0"))">@SnrCalculator.FormatHours(snr.Excellent)</span>
+                                        </span>
+                                    </div>
+                                }
                             </div>
                         }
                     </div>
@@ -379,6 +395,7 @@
     VisibilityWindow? _vis;
     ScoreBreakdown? _breakdown;
     List<SetupFovResult> _fovResults = [];
+    List<SnrTimeEstimate?> _snrEstimates = [];
     bool _isFavorite;
     DateOnly? _imagedOn;
     bool _editingImaged;
@@ -410,7 +427,7 @@
         _loadedName = ObjectName;
 
         _obj = null; _solarObj = null; _vis = null; _breakdown = null; _yearlyScores = null;
-        _fovResults = []; _isFavorite = false; _imagedOn = null; _editingImaged = false; _imagedOnEdit = "";
+        _fovResults = []; _snrEstimates = []; _isFavorite = false; _imagedOn = null; _editingImaged = false; _imagedOnEdit = "";
         _loading = true; _visWindow = ""; _astroBinUrl = "#"; _surveyImageUrl = "";
         _samples = []; _fullCurvePoints = ""; _segsBright = []; _horizonPoints = "";
         _nowXStr = null; _timeLabels = []; _showAladin = false; _aladinNeedsInit = false;
@@ -459,7 +476,13 @@
             }
 
             if (_obj.MajorAxisArcmin is double maj && maj > 0 && _settings.ImagingSetups.Count > 0)
+            {
                 _fovResults = SetupFovResult.Compute(_settings.ImagingSetups, maj);
+                int? bortle = _location?.BortleClass;
+                _snrEstimates = _settings.ImagingSetups
+                    .Select(s => SnrCalculator.Compute(s, _obj, bortle, _settings))
+                    .ToList();
+            }
 
             _visWindow   = BuildVisWindow();
             _astroBinUrl = $"https://www.astrobin.com/search/?q={Uri.EscapeDataString(_obj.DisplayName)}";

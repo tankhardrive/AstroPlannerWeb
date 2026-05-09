@@ -13,4 +13,8 @@ public class ImagingSetup
     public double PixelSizeMicrons { get; set; }
     public int SensorWidthPixels { get; set; }
     public int SensorHeightPixels { get; set; }
+
+    public double QePercent { get; set; } = 65;
+    public double ReadNoiseElectrons { get; set; } = 3.0;
+    public double SubExposureSeconds { get; set; } = 300;
 }

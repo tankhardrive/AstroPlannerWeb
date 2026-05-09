@@ -258,6 +258,28 @@
                             </div>
                         </div>
 
+                        <div class="section-header">Sensor &amp; Noise</div>
+                        <div class="field-row-pair">
+                            <div class="field-row">
+                                <label>QE %</label>
+                                <input type="number" step="1" min="1" max="100"
+                                       value="@_editSetup.QePercent.ToString("F0", CultureInfo.InvariantCulture)"
+                                       @onchange="async e => { _editSetup!.QePercent = ParseDouble(e.Value); await Save(); }" />
+                            </div>
+                            <div class="field-row">
+                                <label>Read Noise e⁻</label>
+                                <input type="number" step="0.1" min="0"
+                                       value="@_editSetup.ReadNoiseElectrons.ToString("F1", CultureInfo.InvariantCulture)"
+                                       @onchange="async e => { _editSetup!.ReadNoiseElectrons = ParseDouble(e.Value); await Save(); }" />
+                            </div>
+                        </div>
+                        <div class="field-row">
+                            <label>Sub Exposure s</label>
+                            <input type="number" step="1" min="1"
+                                   value="@_editSetup.SubExposureSeconds.ToString("F0", CultureInfo.InvariantCulture)"
+                                   @onchange="async e => { _editSetup!.SubExposureSeconds = ParseDouble(e.Value); await Save(); }" />
+                        </div>
+
                         @if (FovCalculator.IsUsable(_editSetup))
                         {
                             var fov = FovCalculator.FovArcmin(_editSetup);
@@ -307,6 +329,48 @@
                         <option value="12">12-hour (9:00 PM)</option>
                     </select>
                 </div>
+
+                <div class="section-header" style="margin-top:8px">SNR Thresholds</div>
+                <div class="field-row">
+                    <label>Preset</label>
+                    <select value="@_settings.SnrPreset.ToString()"
+                            @onchange="OnSnrPresetChanged">
+                        <option value="Community">Community standard (5 / 15 / 30 / 50)</option>
+                        <option value="Conservative">Conservative (10 / 25 / 50 / 100)</option>
+                        <option value="Custom">Custom</option>
+                    </select>
+                </div>
+                @if (_settings.SnrPreset == SnrPreset.Custom)
+                {
+                    <div class="field-row-pair">
+                        <div class="field-row">
+                            <label>Minimum SNR</label>
+                            <input type="number" step="1" min="1"
+                                   value="@_settings.SnrMinimum.ToString("F0", CultureInfo.InvariantCulture)"
+                                   @onchange="async e => { _settings!.SnrMinimum = ParseDouble(e.Value); await Save(); }" />
+                        </div>
+                        <div class="field-row">
+                            <label>Decent SNR</label>
+                            <input type="number" step="1" min="1"
+                                   value="@_settings.SnrDecent.ToString("F0", CultureInfo.InvariantCulture)"
+                                   @onchange="async e => { _settings!.SnrDecent = ParseDouble(e.Value); await Save(); }" />
+                        </div>
+                    </div>
+                    <div class="field-row-pair">
+                        <div class="field-row">
+                            <label>Good SNR</label>
+                            <input type="number" step="1" min="1"
+                                   value="@_settings.SnrGood.ToString("F0", CultureInfo.InvariantCulture)"
+                                   @onchange="async e => { _settings!.SnrGood = ParseDouble(e.Value); await Save(); }" />
+                        </div>
+                        <div class="field-row">
+                            <label>Excellent SNR</label>
+                            <input type="number" step="1" min="1"
+                                   value="@_settings.SnrExcellent.ToString("F0", CultureInfo.InvariantCulture)"
+                                   @onchange="async e => { _settings!.SnrExcellent = ParseDouble(e.Value); await Save(); }" />
+                        </div>
+                    </div>
+                }
 
                 <div class="section-header" style="margin-top:8px">Import / Export</div>
                 <div class="import-export-row">
@@ -567,6 +631,23 @@
     }
 
     // ── General ───────────────────────────────────────────────────────────────
+
+    private async Task OnSnrPresetChanged(ChangeEventArgs e)
+    {
+        if (!Enum.TryParse<SnrPreset>(e.Value?.ToString(), out var preset)) return;
+        _settings!.SnrPreset = preset;
+        if (preset == SnrPreset.Community)
+        {
+            _settings.SnrMinimum = 5; _settings.SnrDecent = 15;
+            _settings.SnrGood = 30;   _settings.SnrExcellent = 50;
+        }
+        else if (preset == SnrPreset.Conservative)
+        {
+            _settings.SnrMinimum = 10; _settings.SnrDecent = 25;
+            _settings.SnrGood = 50;    _settings.SnrExcellent = 100;
+        }
+        await Save();
+    }
 
     private async Task ExportSettings()
     {

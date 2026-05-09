@@ -515,6 +515,33 @@ main  { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .setup-card-fill  { font-size: 0.78rem; color: #7090b8; }
 .setup-card-fov   { font-size: 0.78rem; color: #7090b8; }
 
+.setup-card-snr-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 2px;
+}
+
+.setup-card-snr {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    flex-wrap: wrap;
+}
+
+.snr-sep { font-size: 0.65rem; color: #303050; }
+
+.snr-tier {
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+    cursor: default;
+}
+
+.snr-min       { color: #505070; }
+.snr-decent    { color: #6080a0; }
+.snr-good      { color: #4890b0; }
+.snr-excellent { color: #50c880; }
+
 /* Title block */
 .obj-title-block { margin-bottom: 2px; }
 .obj-name { color: #a0c0f8; font-size: 1.3rem; margin: 0 0 3px; }
