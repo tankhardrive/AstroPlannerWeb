@@ -1,0 +1,377 @@
+@page "/yearly"
+@inject CatalogService CatalogService
+@inject SettingsService SettingsService
+@inject VisibilityService VisibilityService
+@implements IDisposable
+
+<PageTitle>Yearly View — AstroPlanner</PageTitle>
+
+<div class="yearly-page">
+
+    <!-- Controls -->
+    <div class="planner-controls">
+        <div class="control-group">
+            <label>Year</label>
+            <input type="number" min="2020" max="2040" value="@_year"
+                   @onchange="OnYearChanged" style="width: 80px" />
+        </div>
+        <div class="control-group">
+            <label>Location</label>
+            <select value="@_locationName" @onchange="OnLocationChanged">
+                @foreach (var loc in (_settings?.Locations ?? []))
+                {
+                    <option value="@loc.Name">@loc.Name</option>
+                }
+            </select>
+        </div>
+        <div class="control-group search-group">
+            <input type="search" @bind="_searchText" @bind:event="oninput"
+                   @bind:after="ApplyFilter" placeholder="Search objects..." />
+            @if (_searchText.Length > 0)
+            {
+                <button class="search-clear-btn" @onclick="ClearSearch">✕</button>
+            }
+        </div>
+    </div>
+
+    <!-- Type filter chips -->
+    <div class="filter-chips">
+        <button class="chip @(_activeTypeGroups.Count == 0 ? "chip-active" : "")"
+                @onclick="ClearTypeFilter">All</button>
+        @foreach (var group in TypeGroups)
+        {
+            var isActive = _activeTypeGroups.Contains(group.Key);
+            <button class="chip @(isActive ? "chip-active" : "")"
+                    @onclick="() => ToggleTypeGroup(group.Key, group.Value)">
+                @group.Key
+            </button>
+        }
+        <label class="filter-check">
+            <input type="checkbox" @bind="_imagedOnly" @bind:after="ApplyFilter" />
+            Imaged only
+        </label>
+    </div>
+
+    <!-- Status bar -->
+    <div class="status-bar">
+        @if (_loading)
+        {
+            <span class="status-loading">Computing… @_processedCount / @_totalCount objects</span>
+        }
+        else
+        {
+            <span>@_filteredRows.Count objects</span>
+        }
+    </div>
+
+    <!-- Heatmap table -->
+    <div class="yearly-table-wrap">
+        <div class="yearly-list-header">
+            <button class="col-hdr @SortClass(-1)" @onclick='() => SortBy(-1)'>Object @SortArrow(-1)</button>
+            @for (int m = 0; m < 12; m++)
+            {
+                var month = m;
+                <button class="col-hdr yearly-month-hdr @SortClass(month)" @onclick="() => SortBy(month)">
+                    @MonthAbbr[month]@SortArrow(month)
+                </button>
+            }
+        </div>
+        <div class="yearly-list-container">
+            @if (!_loading)
+            {
+                <Virtualize Items="_filteredRows" Context="row" ItemSize="32">
+                    <div class="yearly-row @(_selectedName == row.Object.Name ? "row-selected" : "")"
+                         @onclick="() => SelectObject(row.Object.Name)">
+                        <span class="col-name">
+                            @if (row.Annotation?.IsFavorite == true)
+                            {
+                                <span class="fav-icon">♥</span>
+                            }
+                            @if (row.Annotation?.ImagedOn.HasValue == true)
+                            {
+                                <span class="yearly-imaged">✓</span>
+                            }
+                            <span>@row.Object.DisplayName</span>
+                            @if (row.Object.DisplayName != row.Object.ShortName)
+                            {
+                                <span class="catalog-ids">@row.Object.ShortName</span>
+                            }
+                        </span>
+                        @for (int m = 0; m < 12; m++)
+                        {
+                            var s = row.Scores[m];
+                            <span class="yearly-cell @VisibilityScorer.ScoreCssClass(s)">@(s > 0 ? ((int)s).ToString() : "–")</span>
+                        }
+                    </div>
+                </Virtualize>
+            }
+        </div>
+    </div>
+
+    @if (_selectedName != null)
+    {
+        <div class="planner-detail-panel">
+            <ObjectDetail ObjectName="@_selectedName"
+                          OnClose="() => _selectedName = null"
+                          OnAnnotationChanged="HandleAnnotationChanged" />
+        </div>
+    }
+
+</div>
+
+@code {
+    record MonthData(DateTime DarkStart, DateTime DarkEnd, DateTime[] TimeSteps, double[] LstHours,
+        (double RaDeg, double DecDeg, double IllumPct) MoonInfo);
+    record YearlyRow(DeepSkyObject Object, ObjectAnnotation? Annotation, double[] Scores);
+
+    AppSettings? _settings;
+    string _locationName = "";
+    int    _year = DateTime.Today.Year;
+    string _searchText = "";
+    bool   _imagedOnly;
+
+    readonly HashSet<ObjectType> _activeTypeFilter = [];
+    readonly HashSet<string>     _activeTypeGroups  = [];
+
+    int  _sortCol = -1;   // -1 = name, 0–11 = month index
+    bool _sortAsc = true;
+
+    List<YearlyRow> _allRows      = [];
+    List<YearlyRow> _filteredRows = [];
+
+    bool _loading;
+    int  _processedCount;
+    int  _totalCount;
+    string? _selectedName;
+
+    CancellationTokenSource? _cts;
+
+    static readonly string[] MonthAbbr =
+        ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+    static readonly Dictionary<string, ObjectType[]> TypeGroups = new()
+    {
+        ["Galaxy"]    = [ObjectType.Galaxy, ObjectType.GalaxyPair, ObjectType.GalaxyTriplet, ObjectType.GalaxyGroup],
+        ["Cluster"]   = [ObjectType.GlobularCluster, ObjectType.OpenCluster, ObjectType.ClusterNebula, ObjectType.StellarAssociation],
+        ["Nebula"]    = [ObjectType.EmissionNebula, ObjectType.ReflectionNebula, ObjectType.HiiRegion,
+                         ObjectType.BrightNebula, ObjectType.Nebula, ObjectType.DarkNebula],
+        ["Planetary"] = [ObjectType.PlanetaryNebula],
+        ["SNR"]       = [ObjectType.SupernovaRemnant],
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _settings = await SettingsService.LoadAsync();
+        _locationName = _settings.ActiveLocationName;
+        await CatalogService.EnsureLoadedAsync();
+        await StartComputingAsync();
+    }
+
+    private async Task OnYearChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var y) && y >= 2020 && y <= 2040)
+        {
+            _year = y;
+            await StartComputingAsync();
+        }
+    }
+
+    private async Task OnLocationChanged(ChangeEventArgs e)
+    {
+        _locationName = e.Value?.ToString() ?? "";
+        if (_settings != null)
+            _settings.ActiveLocationName = _locationName;
+        await StartComputingAsync();
+    }
+
+    private async Task StartComputingAsync()
+    {
+        _cts?.Cancel();
+        _cts?.Dispose();
+        _cts = new CancellationTokenSource();
+        var ct = _cts.Token;
+
+        _loading        = true;
+        _allRows        = [];
+        _filteredRows   = [];
+        _processedCount = 0;
+        StateHasChanged();
+
+        try
+        {
+            var location = _settings?.GetActiveLocation();
+            if (location == null) { _loading = false; return; }
+
+            var site    = location.ToSite();
+            var horizon = location.Horizon;
+            const int step = 30;
+            var catalog = CatalogService.GetAll();
+            _totalCount = catalog.Count;
+            int? bortle = location.BortleClass;
+
+            // Precompute night data for the 15th of each month
+            var monthData = new MonthData[12];
+            for (int m = 0; m < 12; m++)
+            {
+                ct.ThrowIfCancellationRequested();
+                var date = new DateOnly(_year, m + 1, 15);
+                var (ds, de) = AstronomyService.GetAstronomicalDarkness(date, site);
+                if (ds >= de)
+                {
+                    monthData[m] = new MonthData(ds, de, [], [], (0, 0, 1));
+                    continue;
+                }
+                var steps = BuildSteps(ds, de, step);
+                var lst   = AstronomyService.ComputeLstHours(steps, site.LongitudeDegrees);
+                var mid   = ds + (de - ds) / 2;
+                var (mRa, mDec, mIll) = AstronomyService.GetMoonPosition(mid);
+                monthData[m] = new MonthData(ds, de, steps, lst, (mRa, mDec, mIll));
+            }
+
+            const int batchSize = 200;
+            var rows = new List<YearlyRow>(catalog.Count);
+
+            for (int i = 0; i < catalog.Count; i += batchSize)
+            {
+                ct.ThrowIfCancellationRequested();
+                int end = Math.Min(i + batchSize, catalog.Count);
+
+                for (int j = i; j < end; j++)
+                {
+                    var obj    = catalog[j];
+                    var scores = new double[12];
+                    for (int m = 0; m < 12; m++)
+                    {
+                        var md = monthData[m];
+                        if (md.TimeSteps.Length == 0) continue;
+                        var w = VisibilityService.ComputeDsoFast(
+                            obj, md.DarkStart, md.DarkEnd, md.TimeSteps, md.LstHours,
+                            site.LatitudeDegrees, horizon, step, md.MoonInfo);
+                        scores[m] = VisibilityScorer.ComputeScore(obj, w, bortle);
+                    }
+                    _settings!.Annotations.TryGetValue(obj.Name, out var ann);
+                    rows.Add(new YearlyRow(obj, ann, scores));
+                }
+
+                _processedCount = end;
+                await Task.Yield();
+                StateHasChanged();
+            }
+
+            _allRows = rows;
+            _loading = false;
+            ApplyFilter();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[Yearly] Error: {ex.Message}");
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private static DateTime[] BuildSteps(DateTime start, DateTime end, int stepMinutes)
+    {
+        var list = new List<DateTime>();
+        for (var t = start; t <= end; t = t.AddMinutes(stepMinutes))
+            list.Add(t);
+        return [.. list];
+    }
+
+    private void ClearTypeFilter()
+    {
+        _activeTypeFilter.Clear();
+        _activeTypeGroups.Clear();
+        ApplyFilter();
+    }
+
+    private void ToggleTypeGroup(string label, ObjectType[] types)
+    {
+        if (_activeTypeGroups.Contains(label))
+        {
+            _activeTypeGroups.Remove(label);
+            foreach (var t in types) _activeTypeFilter.Remove(t);
+        }
+        else
+        {
+            _activeTypeGroups.Add(label);
+            foreach (var t in types) _activeTypeFilter.Add(t);
+        }
+        ApplyFilter();
+    }
+
+    private void ClearSearch()
+    {
+        _searchText = "";
+        ApplyFilter();
+    }
+
+    private void ApplyFilter()
+    {
+        var q = _searchText.Trim();
+        var filtered = _allRows.AsEnumerable();
+
+        if (_activeTypeFilter.Count > 0)
+            filtered = filtered.Where(r => _activeTypeFilter.Contains(r.Object.Type));
+
+        if (_imagedOnly)
+            filtered = filtered.Where(r => r.Annotation?.ImagedOn.HasValue == true);
+
+        if (q.Length > 0)
+            filtered = filtered.Where(r =>
+                r.Object.Name.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                (r.Object.CommonName?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (r.Object.MessierNumber.HasValue &&
+                 $"M{r.Object.MessierNumber}".Contains(q, StringComparison.OrdinalIgnoreCase)) ||
+                (r.Object.CaldwellNumber.HasValue &&
+                 $"C{r.Object.CaldwellNumber}".Contains(q, StringComparison.OrdinalIgnoreCase)));
+
+        _filteredRows = [.. ApplySort(filtered)];
+        StateHasChanged();
+    }
+
+    private IEnumerable<YearlyRow> ApplySort(IEnumerable<YearlyRow> rows) =>
+        _sortCol < 0
+            ? (_sortAsc ? rows.OrderBy(r => r.Object.DisplayName) : rows.OrderByDescending(r => r.Object.DisplayName))
+            : (_sortAsc
+                ? rows.OrderBy(r => r.Scores[_sortCol])
+                : rows.OrderByDescending(r => r.Scores[_sortCol]));
+
+    private void SortBy(int col)
+    {
+        if (_sortCol == col)
+            _sortAsc = !_sortAsc;
+        else
+        {
+            _sortCol = col;
+            _sortAsc = col < 0; // ascending for name, descending for month score
+        }
+        ApplyFilter();
+    }
+
+    private string SortClass(int col) => _sortCol == col ? "col-hdr-active" : "";
+    private string SortArrow(int col)  => _sortCol != col ? "" : _sortAsc ? " ▲" : " ▼";
+
+    private void SelectObject(string name)
+        => _selectedName = _selectedName == name ? null : name;
+
+    private async Task HandleAnnotationChanged(string objectName)
+    {
+        _settings = await SettingsService.LoadAsync();
+        for (int i = 0; i < _allRows.Count; i++)
+        {
+            if (_allRows[i].Object.Name != objectName) continue;
+            _settings.Annotations.TryGetValue(objectName, out var ann);
+            _allRows[i] = _allRows[i] with { Annotation = ann };
+            break;
+        }
+        ApplyFilter();
+    }
+
+    public void Dispose()
+    {
+        _cts?.Cancel();
+        _cts?.Dispose();
+    }
+}

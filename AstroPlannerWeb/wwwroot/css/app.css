@@ -1318,6 +1318,87 @@ main  { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .log-date  { color: #50c880; font-size: 0.8rem; }
 .log-empty { color: #606080; padding: 1rem 0; font-size: 0.85rem; }
 
+/* ── Yearly view page ────────────────────────────────────────────────────── */
+
+.yearly-page {
+    flex: 1;
+    min-height: 0;
+    padding: 0.75rem 1rem 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.yearly-table-wrap {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow-x: auto;
+}
+
+.yearly-list-header,
+.yearly-row {
+    --yearly-cols: 1.5fr repeat(12, 40px);
+    display: grid;
+    grid-template-columns: var(--yearly-cols);
+    align-items: center;
+    padding: 0 8px;
+    gap: 3px;
+    min-width: 640px;
+}
+
+.yearly-list-header {
+    background: #0f0f1e;
+    border-bottom: 1px solid #1a1a30;
+    flex-shrink: 0;
+}
+
+.yearly-month-hdr {
+    text-align: center;
+    padding: 5px 0;
+    font-size: 0.72rem;
+}
+
+.yearly-list-container {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.yearly-row {
+    height: 32px;
+    cursor: pointer;
+    border-bottom: 1px solid #16162a;
+    font-size: 0.8rem;
+    transition: background 0.1s;
+}
+
+.yearly-row:hover { background: #1a1a30; }
+
+.yearly-row.row-selected {
+    background: #131328;
+    border-left: 2px solid #4a6cc4;
+}
+
+.yearly-cell {
+    text-align: center;
+    font-size: 0.72rem;
+    font-weight: 500;
+    border-radius: 2px;
+    padding: 2px 0;
+}
+
+/* Dim the dash for invisible months; add subtle background tints for scored months */
+.yearly-cell.score-none     { color: #252535; }
+.yearly-cell.score-poor     { background: rgba(192,  80,  80, 0.09); }
+.yearly-cell.score-fair     { background: rgba(192, 128,  80, 0.11); }
+.yearly-cell.score-good     { background: rgba(176, 176,  64, 0.11); }
+.yearly-cell.score-great    { background: rgba(112, 200, 112, 0.13); }
+.yearly-cell.score-excellent{ background: rgba( 64, 216, 128, 0.16); }
+
+.yearly-imaged { color: #50c880; font-size: 0.72rem; margin-right: 1px; }
+
 /* ── About tab ───────────────────────────────────────────────────────────── */
 
 .about-tab {
