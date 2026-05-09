@@ -1,0 +1,14 @@
+@page "/object/{CatalogId}"
+@inject NavigationManager Nav
+
+<PageTitle>@Uri.UnescapeDataString(CatalogId) — AstroPlanner</PageTitle>
+
+<div class="object-page">
+    <ObjectDetail ObjectName="@Uri.UnescapeDataString(CatalogId)"
+                  OnClose="GoBack" />
+</div>
+
+@code {
+    [Parameter] public string CatalogId { get; set; } = "";
+    void GoBack() => Nav.NavigateTo("/");
+}

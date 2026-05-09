@@ -1,0 +1,433 @@
+@page "/"
+@inject CatalogService CatalogService
+@inject SettingsService SettingsService
+@inject VisibilityService VisibilityService
+@inject PlannerStateService PlannerState
+@implements IDisposable
+
+<PageTitle>AstroPlanner</PageTitle>
+
+<div class="planner-page">
+
+    <!-- Controls bar -->
+    <div class="planner-controls">
+        <div class="control-group">
+            <label>Date</label>
+            <input type="date" value="@_dateStr" @onchange="OnDateInputChanged" />
+        </div>
+        <div class="control-group">
+            <label>Location</label>
+            <select value="@_activeLocationName" @onchange="OnLocationChanged">
+                @foreach (var loc in (_settings?.Locations ?? []))
+                {
+                    <option value="@loc.Name">@loc.Name</option>
+                }
+            </select>
+        </div>
+        <div class="control-group search-group">
+            <input type="search" @bind="_searchText" @bind:event="oninput"
+                   @bind:after="ApplyFilter" placeholder="Search objects..." />
+        </div>
+        <button class="recalc-btn" @onclick="Recalculate" disabled="@_loading">↻ Recalculate</button>
+    </div>
+
+    <!-- Type filter chips -->
+    <div class="filter-chips">
+        <button class="chip @(_activeTypeGroups.Count == 0 ? "chip-active" : "")"
+                @onclick="ClearTypeFilter">All</button>
+        @foreach (var group in TypeGroups)
+        {
+            var isActive = _activeTypeGroups.Contains(group.Key);
+            <button class="chip @(isActive ? "chip-active" : "")"
+                    @onclick="() => ToggleTypeGroup(group.Key, group.Value)">
+                @group.Key
+            </button>
+        }
+        <button class="chip @(_favoritesOnly ? "chip-active" : "")"
+                @onclick="ToggleFavorites">♥ Fav</button>
+        <label class="filter-check">
+            <input type="checkbox" @bind="_visibleOnly" @bind:after="ApplyFilter" />
+            Visible only
+        </label>
+    </div>
+
+    <!-- Status bar -->
+    <div class="status-bar">
+        @if (_loading)
+        {
+            <span class="status-loading">Computing @_computedCount / @_totalCount…</span>
+        }
+        else
+        {
+            <span>@_filteredRows.Count objects</span>
+        }
+        @if (_nightInfo != null)
+        {
+            <span class="separator">|</span>
+            <span>Night: @FormatLocalTime(_nightInfo.DarkStart) – @FormatLocalTime(_nightInfo.DarkEnd)</span>
+            <span class="separator">|</span>
+            <span>Moon: @((int)_nightInfo.MoonIllum)%</span>
+        }
+    </div>
+
+    <!-- List header -->
+    <div class="obj-list-header">
+        <button class="col-hdr @SortClass("Name")"    @onclick='() => SortBy("Name")'   >Object  @SortArrow("Name")</button>
+        <button class="col-hdr @SortClass("Type")"    @onclick='() => SortBy("Type")'   >Type    @SortArrow("Type")</button>
+        <button class="col-hdr @SortClass("Const")"   @onclick='() => SortBy("Const")'  >Const   @SortArrow("Const")</button>
+        <button class="col-hdr @SortClass("Mag")"     @onclick='() => SortBy("Mag")'    >Mag     @SortArrow("Mag")</button>
+        <button class="col-hdr @SortClass("Size")"    @onclick='() => SortBy("Size")'   >Size    @SortArrow("Size")</button>
+        <button class="col-hdr @SortClass("Score")"   @onclick='() => SortBy("Score")'  >Score   @SortArrow("Score")</button>
+        <button class="col-hdr @SortClass("Visible")" @onclick='() => SortBy("Visible")'>Visible @SortArrow("Visible")</button>
+        <button class="col-hdr @SortClass("Fill")"    @onclick='() => SortBy("Fill")'   >Fill    @SortArrow("Fill")</button>
+    </div>
+
+    <!-- Virtualized object list -->
+    <div class="obj-list-container">
+        <Virtualize Items="_filteredRows" Context="row" ItemSize="36">
+            <div class="obj-row @(row.Window.IsVisible ? "" : "not-visible") @(row.Annotation?.IsFavorite == true ? "favorite" : "") @(_selectedName == row.Object.Name ? "row-selected" : "")"
+                 @onclick="() => SelectObject(row.Object.Name)">
+                <span class="col-name">
+                    @if (row.Annotation?.IsFavorite == true)
+                    {
+                        <span class="fav-icon">♥</span>
+                    }
+                    <span>@row.Object.DisplayName</span>
+                    @if (row.Object.DisplayName != row.Object.ShortName)
+                    {
+                        <span class="catalog-ids">@row.Object.ShortName</span>
+                    }
+                </span>
+                <span class="col-type">@row.Object.Type.ToShortString()</span>
+                <span class="col-const">@row.Object.Constellation</span>
+                <span class="col-mag">@(row.Object.DisplayMagnitude < 99 ? row.Object.DisplayMagnitude.ToString("F1") : "–")</span>
+                <span class="col-size">@row.Object.SizeDisplay</span>
+                <span class="col-score @VisibilityScorer.ScoreCssClass(row.Score)">@VisibilityScorer.ScoreDisplay(row.Score)</span>
+                <span class="col-visible">@(row.Window.IsVisible ? FormatDuration(row.Window.Duration) : "–")</span>
+                <span class="col-fill @(row.BestFillPct > 100 ? "fill-over" : "")">@(row.BestFillPct.HasValue ? $"{row.BestFillPct.Value:F0}%" : "–")</span>
+            </div>
+        </Virtualize>
+    </div>
+
+    @if (_selectedName != null)
+    {
+        <div class="planner-detail-panel">
+            <ObjectDetail ObjectName="@_selectedName"
+                          OnClose="CloseDetail"
+                          OnAnnotationChanged="HandleAnnotationChanged" />
+        </div>
+    }
+
+</div>
+
+@code {
+    AppSettings? _settings;
+    string _dateStr = DateTime.Today.ToString("yyyy-MM-dd");
+    DateOnly _selectedDate = DateOnly.FromDateTime(DateTime.Today);
+    string _activeLocationName = "";
+    string _searchText = "";
+
+    readonly HashSet<ObjectType> _activeTypeFilter = [];
+    readonly HashSet<string>     _activeTypeGroups  = [];
+    bool _favoritesOnly;
+
+    string _sortColumn    { get => PlannerState.SortColumn;    set => PlannerState.SortColumn    = value; }
+    bool   _sortAscending { get => PlannerState.SortAscending; set => PlannerState.SortAscending = value; }
+    bool   _visibleOnly   = true;
+    string? _selectedName;
+
+    List<PlannerRow> _allRows      = [];
+    List<PlannerRow> _filteredRows = [];
+
+    bool  _loading;
+    int   _computedCount;
+    int   _totalCount;
+    NightInfo? _nightInfo;
+
+    CancellationTokenSource? _cts;
+
+    private static readonly Dictionary<string, ObjectType[]> TypeGroups = new()
+    {
+        ["Galaxy"]    = [ObjectType.Galaxy, ObjectType.GalaxyPair, ObjectType.GalaxyTriplet, ObjectType.GalaxyGroup],
+        ["Cluster"]   = [ObjectType.GlobularCluster, ObjectType.OpenCluster, ObjectType.ClusterNebula, ObjectType.StellarAssociation],
+        ["Nebula"]    = [ObjectType.EmissionNebula, ObjectType.ReflectionNebula, ObjectType.HiiRegion,
+                         ObjectType.BrightNebula, ObjectType.Nebula, ObjectType.DarkNebula],
+        ["Planetary"] = [ObjectType.PlanetaryNebula],
+        ["SNR"]       = [ObjectType.SupernovaRemnant],
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _settings = await SettingsService.LoadAsync();
+        _activeLocationName = _settings.ActiveLocationName;
+        await CatalogService.EnsureLoadedAsync();
+        await StartComputingAsync();
+    }
+
+    private async Task OnDateInputChanged(ChangeEventArgs e)
+    {
+        _dateStr = e.Value?.ToString() ?? "";
+        if (DateOnly.TryParseExact(_dateStr, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var d))
+        {
+            _selectedDate = d;
+            await StartComputingAsync();
+        }
+    }
+
+    private async Task OnLocationChanged(ChangeEventArgs e)
+    {
+        _activeLocationName = e.Value?.ToString() ?? "";
+        if (_settings != null)
+            _settings.ActiveLocationName = _activeLocationName;
+        await StartComputingAsync();
+    }
+
+    private void ClearTypeFilter()
+    {
+        _activeTypeFilter.Clear();
+        _activeTypeGroups.Clear();
+        ApplyFilter();
+    }
+
+    private void ToggleTypeGroup(string label, ObjectType[] types)
+    {
+        if (_activeTypeGroups.Contains(label))
+        {
+            _activeTypeGroups.Remove(label);
+            foreach (var t in types) _activeTypeFilter.Remove(t);
+        }
+        else
+        {
+            _activeTypeGroups.Add(label);
+            foreach (var t in types) _activeTypeFilter.Add(t);
+        }
+        ApplyFilter();
+    }
+
+    private void ToggleFavorites()
+    {
+        _favoritesOnly = !_favoritesOnly;
+        ApplyFilter();
+    }
+
+    private async Task Recalculate()
+    {
+        PlannerState.Invalidate();
+        await StartComputingAsync();
+    }
+
+    private async Task StartComputingAsync()
+    {
+        // Serve from cache if date + location haven't changed
+        if (PlannerState.IsValid(_selectedDate, _activeLocationName))
+        {
+            var (rows, night) = PlannerState.Get();
+            _allRows   = rows;
+            _nightInfo = night;
+            _loading   = false;
+            ApplyFilter();
+            return;
+        }
+
+        _cts?.Cancel();
+        _cts?.Dispose();
+        _cts = new CancellationTokenSource();
+        var ct = _cts.Token;
+
+        _loading      = true;
+        _allRows      = [];
+        _filteredRows = [];
+        _computedCount = 0;
+        StateHasChanged();
+
+        try
+        {
+            var location = _settings?.GetActiveLocation();
+            if (location == null) { _loading = false; return; }
+
+            var site    = location.ToSite();
+            var horizon = location.Horizon;
+            int step    = _settings?.VisibilityStepMinutes ?? 15;
+            var catalog = CatalogService.GetAll();
+            _totalCount = catalog.Count;
+
+            // Compute night window and moon once
+            var (darkStart, darkEnd) = AstronomyService.GetAstronomicalDarkness(_selectedDate, site);
+            var midNight = darkStart + (darkEnd - darkStart) / 2;
+            var (moonRa, moonDec, moonIllum) = AstronomyService.GetMoonPosition(midNight);
+            _nightInfo = new NightInfo(darkStart, darkEnd, moonIllum);
+            var moonInfo = (moonRa, moonDec, moonIllum);
+
+            // Precompute LST for all time steps — avoids recomputing GAST per-object
+            var stepList = new List<DateTime>();
+            for (var t = darkStart; t <= darkEnd; t = t.AddMinutes(step))
+                stepList.Add(t);
+            var timeSteps = stepList.ToArray();
+            var lstHours  = AstronomyService.ComputeLstHours(timeSteps, site.LongitudeDegrees);
+
+            const int batchSize = 500;
+            var rows = new List<PlannerRow>(catalog.Count);
+            var usableSetups = _settings!.ImagingSetups.Where(FovCalculator.IsUsable).ToList();
+
+            for (int i = 0; i < catalog.Count; i += batchSize)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                int end = Math.Min(i + batchSize, catalog.Count);
+                for (int j = i; j < end; j++)
+                {
+                    var obj    = catalog[j];
+                    var window = VisibilityService.ComputeDsoFast(
+                        obj, darkStart, darkEnd, timeSteps, lstHours,
+                        site.LatitudeDegrees, horizon, step, moonInfo);
+                    var score = VisibilityScorer.ComputeScore(obj, window);
+                    _settings!.Annotations.TryGetValue(obj.Name, out var ann);
+                    double? fill = null;
+                    if (usableSetups.Count > 0 && obj.MajorAxisArcmin is double maj && maj > 0)
+                    {
+                        var best = FovCalculator.BestSetup(usableSetups, maj);
+                        if (best != null) fill = FovCalculator.FillPercent(best, maj);
+                    }
+                    rows.Add(new PlannerRow(obj, window, score, ann, fill));
+                }
+
+                _computedCount = end;
+                await Task.Yield();
+                StateHasChanged();
+            }
+
+            ct.ThrowIfCancellationRequested();
+
+            _allRows = [.. rows
+                .OrderByDescending(r => r.Score)
+                .ThenByDescending(r => r.Window.IsVisible)
+                .ThenBy(r => r.Object.DisplayMagnitude)];
+
+            PlannerState.Store(_selectedDate, _activeLocationName, _allRows, _nightInfo);
+
+            _loading = false;
+            ApplyFilter();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[Planner] Scoring error: {ex.Message}");
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ApplyFilter()
+    {
+        var q = _searchText.Trim();
+
+        var filtered = _allRows.Where(r =>
+        {
+            if (_activeTypeFilter.Count > 0 && !_activeTypeFilter.Contains(r.Object.Type))
+                return false;
+
+            if (_visibleOnly && !r.Window.IsVisible)
+                return false;
+
+            if (_favoritesOnly && r.Annotation?.IsFavorite != true)
+                return false;
+
+            if (q.Length > 0)
+            {
+                bool hit =
+                    r.Object.Name.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                    (r.Object.CommonName?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (r.Object.MessierNumber.HasValue &&
+                     $"M{r.Object.MessierNumber}".Contains(q, StringComparison.OrdinalIgnoreCase)) ||
+                    (r.Object.CaldwellNumber.HasValue &&
+                     $"C{r.Object.CaldwellNumber}".Contains(q, StringComparison.OrdinalIgnoreCase)) ||
+                    r.Object.Constellation.Contains(q, StringComparison.OrdinalIgnoreCase);
+                if (!hit) return false;
+            }
+
+            return true;
+        });
+
+        _filteredRows = [.. ApplySort(filtered)];
+        StateHasChanged();
+    }
+
+    private IEnumerable<PlannerRow> ApplySort(IEnumerable<PlannerRow> rows) =>
+        (_sortColumn, _sortAscending) switch
+        {
+            ("Name",    true)  => rows.OrderBy(r => r.Object.DisplayName),
+            ("Name",    false) => rows.OrderByDescending(r => r.Object.DisplayName),
+            ("Type",    true)  => rows.OrderBy(r => r.Object.Type.ToDisplayString()),
+            ("Type",    false) => rows.OrderByDescending(r => r.Object.Type.ToDisplayString()),
+            ("Const",   true)  => rows.OrderBy(r => r.Object.Constellation),
+            ("Const",   false) => rows.OrderByDescending(r => r.Object.Constellation),
+            ("Mag",     true)  => rows.OrderBy(r => r.Object.DisplayMagnitude),
+            ("Mag",     false) => rows.OrderByDescending(r => r.Object.DisplayMagnitude),
+            ("Size",    true)  => rows.OrderBy(r => r.Object.MajorAxisArcmin ?? 0),
+            ("Size",    false) => rows.OrderByDescending(r => r.Object.MajorAxisArcmin ?? 0),
+            ("Visible", true)  => rows.OrderBy(r => r.Window.Duration),
+            ("Visible", false) => rows.OrderByDescending(r => r.Window.Duration),
+            ("Fill",    true)  => rows.OrderBy(r => r.BestFillPct ?? double.MaxValue),
+            ("Fill",    false) => rows.OrderByDescending(r => r.BestFillPct ?? -1),
+            (_,         true)  => rows.OrderBy(r => r.Score),
+            (_,         false) => rows.OrderByDescending(r => r.Score),
+        };
+
+    private void SortBy(string column)
+    {
+        if (_sortColumn == column)
+            _sortAscending = !_sortAscending;
+        else
+        {
+            _sortColumn = column;
+            _sortAscending = column is "Name" or "Type" or "Const";
+        }
+        ApplyFilter();
+    }
+
+    private string SortClass(string col) =>
+        _sortColumn == col ? "col-hdr-active" : "";
+
+    private string SortArrow(string col) =>
+        _sortColumn != col ? "" : _sortAscending ? " ▲" : " ▼";
+
+    private void SelectObject(string name)
+        => _selectedName = _selectedName == name ? null : name;
+
+    private void CloseDetail()
+        => _selectedName = null;
+
+    private async Task HandleAnnotationChanged(string objectName)
+    {
+        _settings = await SettingsService.LoadAsync();
+        for (int i = 0; i < _allRows.Count; i++)
+        {
+            if (_allRows[i].Object.Name != objectName) continue;
+            _settings.Annotations.TryGetValue(objectName, out var ann);
+            _allRows[i] = _allRows[i] with { Annotation = ann };
+            break;
+        }
+        ApplyFilter();
+    }
+
+    private string FormatLocalTime(DateTime utc)
+    {
+        var location = _settings?.GetActiveLocation();
+        try
+        {
+            var local = TimeZoneInfo.ConvertTimeFromUtc(utc, location?.GetTimeZone() ?? TimeZoneInfo.Utc);
+            return local.ToString("HH:mm");
+        }
+        catch { return utc.ToString("HH:mm") + " UTC"; }
+    }
+
+    private static string FormatDuration(TimeSpan ts)
+        => ts.TotalHours >= 1 ? $"{(int)ts.TotalHours}h {ts.Minutes:D2}m" : $"{ts.Minutes}m";
+
+    public void Dispose()
+    {
+        _cts?.Cancel();
+        _cts?.Dispose();
+    }
+}

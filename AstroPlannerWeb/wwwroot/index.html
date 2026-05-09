@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AstroPlannerWeb</title>
+    <base href="/" />
+    <link rel="preload" id="webassembly" />
+    <link rel="stylesheet" href="lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="css/app.css" />
+    <link rel="icon" type="image/x-icon" href="favicon.ico" />
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon.png" />
+    <link href="AstroPlannerWeb.styles.css" rel="stylesheet" />
+    <link href="manifest.webmanifest" rel="manifest" />
+    <link rel="apple-touch-icon" sizes="512x512" href="icon-512.png" />
+    <link rel="apple-touch-icon" sizes="192x192" href="icon-192.png" />
+    <script type="importmap"></script>
+</head>
+
+<body>
+    <div id="app">
+        <svg class="loading-progress">
+            <circle r="40%" cx="50%" cy="50%" />
+            <circle r="40%" cx="50%" cy="50%" />
+        </svg>
+        <div class="loading-progress-text"></div>
+    </div>
+
+    <div id="blazor-error-ui">
+        An unhandled error has occurred.
+        <a href="." class="reload">Reload</a>
+        <span class="dismiss">🗙</span>
+    </div>
+    <script src="_framework/blazor.webassembly#[.{fingerprint}].js"></script>
+    <script>navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' });</script>
+    <script>
+        window.downloadText = (filename, text) => {
+            const blob = new Blob([text], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        };
+        window.getBrowserTimezone = () =>
+            Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+        window.getCurrentPosition = () => new Promise((resolve, reject) => {
+            if (!navigator.geolocation) { reject('Geolocation not supported'); return; }
+            navigator.geolocation.getCurrentPosition(
+                p => resolve({ lat: p.coords.latitude, lon: p.coords.longitude }),
+                e => reject(e.message || 'Location access denied'),
+                { timeout: 15000, enableHighAccuracy: false }
+            );
+        });
+
+        window.initAladinViewer = async (containerId, ra, dec, setupsJson) => {
+            const CSS_URL = 'https://aladin.cds.unistra.fr/AladinLite/api/v3/latest/aladin.min.css';
+            const JS_URL  = 'https://aladin.cds.unistra.fr/AladinLite/api/v3/latest/aladin.js';
+
+            if (!document.querySelector(`link[href="${CSS_URL}"]`)) {
+                const l = document.createElement('link');
+                l.rel = 'stylesheet'; l.href = CSS_URL;
+                document.head.appendChild(l);
+            }
+
+            if (!window.A || !window.A.init) {
+                await new Promise((ok, fail) => {
+                    const s = document.createElement('script');
+                    s.src = JS_URL; s.charset = 'utf-8';
+                    s.onload = ok; s.onerror = fail;
+                    document.head.appendChild(s);
+                });
+            }
+
+            await window.A.init;
+
+            const setups  = JSON.parse(setupsJson || '[]');
+            const cosDec  = Math.cos(dec * Math.PI / 180);
+
+            let viewFov = 1.0;
+            if (setups.length > 0) {
+                const s    = setups.find(x => x.best) || setups[0];
+                const diag = Math.sqrt(s.w * s.w + s.h * s.h);
+                viewFov = Math.min(Math.max(diag * 2.5 / 60, 0.25), 4.0);
+            }
+
+            const aladin = window.A.aladin('#' + containerId, {
+                survey: 'P/DSS2/color',
+                target: ra + ' ' + dec,
+                fov:    viewFov,
+                showReticle: true, showZoomControl: true,
+                showFullscreenControl: true, showLayersControl: true,
+                showGotoControl: true, showShareControl: false,
+            });
+
+            setups.forEach(s => {
+                const ov = window.A.graphicOverlay({ color: s.color, lineWidth: s.best ? 2.5 : 1.5 });
+                aladin.addOverlay(ov);
+                const hw = (s.w / 60 / 2) / cosDec;
+                const hh =  s.h / 60 / 2;
+                ov.add(window.A.polyline([
+                    [ra - hw, dec - hh], [ra + hw, dec - hh],
+                    [ra + hw, dec + hh], [ra - hw, dec + hh],
+                    [ra - hw, dec - hh],
+                ]));
+            });
+        };
+    </script>
+</body>
+
+</html>

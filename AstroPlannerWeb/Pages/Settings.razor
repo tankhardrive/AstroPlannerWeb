@@ -1,0 +1,714 @@
+@page "/settings"
+@inject SettingsService SettingsService
+@inject PlannerStateService PlannerState
+@inject IJSRuntime JS
+@using Microsoft.AspNetCore.Components.Forms
+@using System.Text.Json
+@using System.IO
+
+<PageTitle>Settings — AstroPlanner</PageTitle>
+
+<div class="settings-page">
+    @if (_settings == null)
+    {
+        <p class="settings-loading">Loading…</p>
+    }
+    else
+    {
+        <div class="settings-tabs">
+            <button class="tab-btn @(_tab == 0 ? "tab-active" : "")" @onclick="() => _tab = 0">Locations</button>
+            <button class="tab-btn @(_tab == 1 ? "tab-active" : "")" @onclick="() => _tab = 1">Imaging Setups</button>
+            <button class="tab-btn @(_tab == 2 ? "tab-active" : "")" @onclick="() => _tab = 2">General</button>
+            <button class="tab-btn @(_tab == 3 ? "tab-active" : "")" @onclick="() => _tab = 3">About</button>
+            @if (_savedFlash)
+            {
+                <span class="saved-flash" @key="_saveKey">✓ Saved</span>
+            }
+        </div>
+
+        @if (_tab == 0)
+        {
+            <div class="settings-split">
+                <div class="settings-list">
+                    @foreach (var loc in _settings.Locations)
+                    {
+                        <div class="settings-list-item @(loc == _editLoc ? "list-item-active" : "")"
+                             @onclick="() => SelectLocation(loc)">
+                            <span class="list-item-name">@loc.Name</span>
+                            @if (loc.Name == _settings.ActiveLocationName)
+                            {
+                                <span class="active-badge">active</span>
+                            }
+                        </div>
+                    }
+                    <button class="btn-add" @onclick="AddLocation">+ Add</button>
+                </div>
+
+                @if (_editLoc != null)
+                {
+                    <div class="settings-editor">
+                        <div class="field-row">
+                            <label>Name</label>
+                            <input type="text" value="@_editLoc.Name"
+                                   @onchange="OnLocationNameChanged" />
+                        </div>
+                        <div class="field-row-pair">
+                            <div class="field-row">
+                                <label>Latitude °</label>
+                                <input type="number" step="0.0001" min="-90" max="90"
+                                       value="@_editLoc.LatitudeDegrees.ToString("F4", CultureInfo.InvariantCulture)"
+                                       @onchange="async e => { _editLoc!.LatitudeDegrees = ParseDouble(e.Value); await Save(); }" />
+                            </div>
+                            <div class="field-row">
+                                <label>Longitude °</label>
+                                <input type="number" step="0.0001" min="-180" max="180"
+                                       value="@_editLoc.LongitudeDegrees.ToString("F4", CultureInfo.InvariantCulture)"
+                                       @onchange="async e => { _editLoc!.LongitudeDegrees = ParseDouble(e.Value); await Save(); }" />
+                            </div>
+                        </div>
+                        <div class="field-row">
+                            <label></label>
+                            <button class="btn-secondary btn-autodetect" @onclick="AutoDetectLocation" disabled="@_geoLoading">
+                                @(_geoLoading ? "Detecting…" : "Auto-detect location")
+                            </button>
+                            @if (_geoError != null)
+                            {
+                                <span class="geo-error">@_geoError</span>
+                            }
+                        </div>
+                        <div class="field-row-pair">
+                            <div class="field-row">
+                                <label>Elevation m</label>
+                                <input type="number" step="1" min="0"
+                                       value="@_editLoc.ElevationMeters.ToString("F0", CultureInfo.InvariantCulture)"
+                                       @onchange="async e => { _editLoc!.ElevationMeters = ParseDouble(e.Value); await Save(); }" />
+                            </div>
+                            <div class="field-row">
+                                <label>Bortle (1–9)</label>
+                                <select value="@(_editLoc.BortleClass?.ToString() ?? "")"
+                                        @onchange="OnBortleChanged">
+                                    <option value="">—</option>
+                                    @for (int i = 1; i <= 9; i++)
+                                    {
+                                        var ii = i;
+                                        <option value="@ii">@ii — @BortleLabel(ii)</option>
+                                    }
+                                </select>
+                            </div>
+                        </div>
+                        <div class="field-row">
+                            <label>Timezone</label>
+                            <select value="@_editLoc.TimeZoneId"
+                                    @onchange='async e => { _editLoc!.TimeZoneId = e.Value?.ToString() ?? "UTC"; await Save(); }'>
+                                @foreach (var group in TimezoneGroups)
+                                {
+                                    @if (group.Key == "UTC")
+                                    {
+                                        <option value="UTC">UTC</option>
+                                    }
+                                    else
+                                    {
+                                        <optgroup label="@group.Key">
+                                            @foreach (var tz in group.Value)
+                                            {
+                                                <option value="@tz">@tz</option>
+                                            }
+                                        </optgroup>
+                                    }
+                                }
+                            </select>
+                        </div>
+
+                        <div class="section-header">Horizon Profile</div>
+                        <div class="horizon-chart-wrap">
+                            <svg class="horizon-chart" viewBox="0 0 360 60" preserveAspectRatio="none">
+                                <rect width="360" height="60" fill="#0d0d1a" />
+                                <!-- altitude grid lines: 45°, 30°, 15°, 0° -->
+                                <line x1="0" y1="0"  x2="360" y2="0"  stroke="#1a1a2e" stroke-width="0.5" />
+                                <line x1="0" y1="18" x2="360" y2="18" stroke="#1a1a2e" stroke-width="0.5" />
+                                <line x1="0" y1="36" x2="360" y2="36" stroke="#1a1a2e" stroke-width="0.5" />
+                                <line x1="0" y1="54" x2="360" y2="54" stroke="#2a2a4a" stroke-width="0.7" />
+                                <!-- azimuth cardinal lines: N, E, S, W -->
+                                <line x1="0"   y1="0" x2="0"   y2="60" stroke="#1a1a2e" stroke-width="0.5" />
+                                <line x1="90"  y1="0" x2="90"  y2="60" stroke="#1a1a2e" stroke-width="0.5" />
+                                <line x1="180" y1="0" x2="180" y2="60" stroke="#1a1a2e" stroke-width="0.5" />
+                                <line x1="270" y1="0" x2="270" y2="60" stroke="#1a1a2e" stroke-width="0.5" />
+                                <!-- fill below horizon -->
+                                <path d="@GetHorizonFillPath(_editLoc.Horizon)" fill="rgba(50,100,180,0.18)" />
+                                <!-- horizon line -->
+                                <polyline points="@GetHorizonPolyline(_editLoc.Horizon)"
+                                          fill="none" stroke="#4a9fc4" stroke-width="1.5" stroke-linejoin="round" />
+                            </svg>
+                            <div class="horizon-az-labels">
+                                <span>N</span><span>E</span><span>S</span><span>W</span><span>N</span>
+                            </div>
+                        </div>
+
+                        <div class="horizon-actions">
+                            <label class="btn-secondary file-btn">
+                                Import .hor
+                                <InputFile OnChange="OnHorizonFileSelected" accept=".hor,.lsp,.txt,text/plain" style="display:none" />
+                            </label>
+                            <button class="btn-secondary @(_showHorizonPaste ? "tab-active" : "")"
+                                    @onclick="ToggleHorizonPaste">
+                                Paste data
+                            </button>
+                            <button class="btn-secondary" @onclick="ResetHorizon">Reset to Flat</button>
+                        </div>
+
+                        @if (_showHorizonPaste)
+                        {
+                            <div class="horizon-paste-area">
+                                <textarea rows="7"
+                                          placeholder="# Az Alt (degrees, one pair per line)&#10;0 5&#10;90 12&#10;180 8&#10;270 3"
+                                          value="@_horizonPasteText"
+                                          @oninput="e => _horizonPasteText = e.Value?.ToString() ?? string.Empty">
+                                </textarea>
+                                <div class="horizon-paste-actions">
+                                    <button class="btn-primary" @onclick="ApplyHorizonPaste">Apply</button>
+                                    <span class="paste-hint">Stellarium format: azimuth altitude per line, # for comments</span>
+                                </div>
+                            </div>
+                        }
+
+                        <div class="editor-actions">
+                            @if (_editLoc.Name != _settings.ActiveLocationName)
+                            {
+                                <button class="btn-primary" @onclick="SetActiveLocation">Set Active</button>
+                            }
+                            else
+                            {
+                                <span class="active-badge">Active location</span>
+                            }
+                            <button class="btn-danger" @onclick="DeleteLocation"
+                                    disabled="@(_settings.Locations.Count <= 1)">Delete</button>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+        else if (_tab == 1)
+        {
+            <div class="settings-split">
+                <div class="settings-list">
+                    @foreach (var setup in _settings.ImagingSetups)
+                    {
+                        <div class="settings-list-item @(setup == _editSetup ? "list-item-active" : "")"
+                             @onclick="() => _editSetup = setup">
+                            <span class="list-item-name">@setup.Name</span>
+                        </div>
+                    }
+                    <button class="btn-add" @onclick="AddImagingSetup">+ Add</button>
+                </div>
+
+                @if (_editSetup != null)
+                {
+                    <div class="settings-editor">
+                        <div class="field-row">
+                            <label>Setup Name</label>
+                            <input type="text" value="@_editSetup.Name"
+                                   @onchange='async e => { _editSetup!.Name = e.Value?.ToString() ?? ""; await Save(); }' />
+                        </div>
+
+                        <div class="section-header">Telescope</div>
+                        <div class="field-row">
+                            <label>Name</label>
+                            <input type="text" value="@_editSetup.TelescopeName"
+                                   @onchange='async e => { _editSetup!.TelescopeName = e.Value?.ToString() ?? ""; await Save(); }' />
+                        </div>
+                        <div class="field-row-pair">
+                            <div class="field-row">
+                                <label>Focal Length mm</label>
+                                <input type="number" step="1" min="0"
+                                       value="@_editSetup.FocalLengthMm.ToString("F0", CultureInfo.InvariantCulture)"
+                                       @onchange="async e => { _editSetup!.FocalLengthMm = ParseDouble(e.Value); await Save(); }" />
+                            </div>
+                            <div class="field-row">
+                                <label>Aperture mm</label>
+                                <input type="number" step="1" min="0"
+                                       value="@_editSetup.ApertureMm.ToString("F0", CultureInfo.InvariantCulture)"
+                                       @onchange="async e => { _editSetup!.ApertureMm = ParseDouble(e.Value); await Save(); }" />
+                            </div>
+                        </div>
+
+                        <div class="section-header">Camera</div>
+                        <div class="field-row">
+                            <label>Name</label>
+                            <input type="text" value="@_editSetup.CameraName"
+                                   @onchange='async e => { _editSetup!.CameraName = e.Value?.ToString() ?? ""; await Save(); }' />
+                        </div>
+                        <div class="field-row">
+                            <label>Pixel Size μm</label>
+                            <input type="number" step="0.01" min="0"
+                                   value="@_editSetup.PixelSizeMicrons.ToString("F2", CultureInfo.InvariantCulture)"
+                                   @onchange="async e => { _editSetup!.PixelSizeMicrons = ParseDouble(e.Value); await Save(); }" />
+                        </div>
+                        <div class="field-row-pair">
+                            <div class="field-row">
+                                <label>Width px</label>
+                                <input type="number" step="1" min="0"
+                                       value="@_editSetup.SensorWidthPixels"
+                                       @onchange="async e => { _editSetup!.SensorWidthPixels = (int)ParseDouble(e.Value); await Save(); }" />
+                            </div>
+                            <div class="field-row">
+                                <label>Height px</label>
+                                <input type="number" step="1" min="0"
+                                       value="@_editSetup.SensorHeightPixels"
+                                       @onchange="async e => { _editSetup!.SensorHeightPixels = (int)ParseDouble(e.Value); await Save(); }" />
+                            </div>
+                        </div>
+
+                        @if (FovCalculator.IsUsable(_editSetup))
+                        {
+                            var fov = FovCalculator.FovArcmin(_editSetup);
+                            var ps  = FovCalculator.PlateScaleArcsecPx(_editSetup.FocalLengthMm, _editSetup.PixelSizeMicrons);
+                            <div class="section-header">Computed FOV</div>
+                            <div class="derived-grid">
+                                <span class="derived-label">Plate scale</span>
+                                <span class="derived-value">@ps.ToString("F2", CultureInfo.InvariantCulture) ″/px</span>
+                                <span class="derived-label">Field of view</span>
+                                <span class="derived-value">@FovCalculator.FormatArcmin(fov.WidthArcmin) × @FovCalculator.FormatArcmin(fov.HeightArcmin)</span>
+                            </div>
+                        }
+
+                        <div class="editor-actions">
+                            <button class="btn-danger" @onclick="DeleteImagingSetup">Delete</button>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="settings-editor settings-empty">
+                        <p>No setup selected. Add one to compute FOV for deep-sky objects.</p>
+                    </div>
+                }
+            </div>
+        }
+        else if (_tab == 2)
+        {
+            <div class="settings-editor general-tab">
+                <div class="section-header">Computation</div>
+                <div class="field-row">
+                    <label>Visibility step</label>
+                    <select value="@_settings.VisibilityStepMinutes"
+                            @onchange='async e => { _settings!.VisibilityStepMinutes = int.Parse(e.Value?.ToString() ?? "15"); await Save(); }'>
+                        <option value="5">5 min (precise, slow)</option>
+                        <option value="10">10 min</option>
+                        <option value="15">15 min (default)</option>
+                        <option value="30">30 min (fast)</option>
+                    </select>
+                </div>
+
+                <div class="section-header" style="margin-top:8px">Import / Export</div>
+                <div class="import-export-row">
+                    <button class="btn-secondary" @onclick="ExportSettings">Export JSON</button>
+                    <label class="btn-secondary file-btn">
+                        Import JSON
+                        <InputFile OnChange="ImportSettings" accept=".json,application/json" style="display:none" />
+                    </label>
+                </div>
+                @if (_importError != null)
+                {
+                    <p class="error-msg">@_importError</p>
+                }
+            </div>
+        }
+        else if (_tab == 3)
+        {
+            <div class="about-tab">
+                <div class="about-name">AstroPlanner <span class="about-version">v@_appVersion</span></div>
+                <p class="about-desc">
+                    A deep-sky observing planner for amateur astronomers. Plan your night by
+                    scoring objects against your site's darkness window, horizon profile, and
+                    imaging setup field of view.
+                </p>
+
+                <div class="about-section-header">Data sources</div>
+                <div class="about-sources">
+                    <div class="about-source-row">
+                        <span class="about-source-lbl">Object catalog</span>
+                        <span class="about-source-val">NGC/IC — OpenNGC</span>
+                    </div>
+                    <div class="about-source-row">
+                        <span class="about-source-lbl">Sky survey images</span>
+                        <span class="about-source-val">DSS2 Color via CDS HiPS2FITS</span>
+                    </div>
+                    <div class="about-source-row">
+                        <span class="about-source-lbl">Interactive sky</span>
+                        <span class="about-source-val">Aladin Lite (CDS, Strasbourg)</span>
+                    </div>
+                    <div class="about-source-row">
+                        <span class="about-source-lbl">Planetary positions</span>
+                        <span class="about-source-val">VSOP87 / Jean Meeus algorithms</span>
+                    </div>
+                </div>
+
+                <div class="about-section-header">Technology</div>
+                <div class="about-sources">
+                    <div class="about-source-row">
+                        <span class="about-source-lbl">Framework</span>
+                        <span class="about-source-val">Blazor WebAssembly (.NET 10)</span>
+                    </div>
+                    <div class="about-source-row">
+                        <span class="about-source-lbl">Offline support</span>
+                        <span class="about-source-val">Progressive Web App (PWA)</span>
+                    </div>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    AppSettings? _settings;
+    static readonly string _appVersion =
+        typeof(Settings).Assembly.GetName().Version?.ToString(3) ?? "—";
+    int _tab = 0;
+    ObservationLocation? _editLoc;
+    string _prevLocName = "";
+    ImagingSetup? _editSetup;
+    string? _importError;
+    bool _geoLoading;
+    string? _geoError;
+    bool _savedFlash;
+    int _saveKey;
+    int _flashVersion;
+    bool _showHorizonPaste;
+    string _horizonPasteText = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _settings = await SettingsService.LoadAsync();
+        _editLoc = _settings.GetActiveLocation();
+        if (_editLoc != null) _prevLocName = _editLoc.Name;
+        _editSetup = _settings.ImagingSetups.FirstOrDefault();
+    }
+
+    private async Task Save()
+    {
+        await SettingsService.SaveAsync();
+        PlannerState.Invalidate();
+        _savedFlash = true;
+        _saveKey++;
+        int myVersion = _flashVersion = _saveKey;
+        StateHasChanged();
+        await Task.Delay(2000);
+        if (_flashVersion == myVersion)
+        {
+            _savedFlash = false;
+            StateHasChanged();
+        }
+    }
+
+    // ── Locations ─────────────────────────────────────────────────────────────
+
+    private async Task AutoDetectLocation()
+    {
+        _geoError = null;
+        _geoLoading = true;
+        StateHasChanged();
+        try
+        {
+            var tz = await JS.InvokeAsync<string>("getBrowserTimezone");
+            if (!string.IsNullOrEmpty(tz))
+                _editLoc!.TimeZoneId = tz;
+
+            var pos = await JS.InvokeAsync<GeoPosition>("getCurrentPosition");
+            _editLoc!.LatitudeDegrees  = Math.Round(pos.Lat, 4);
+            _editLoc!.LongitudeDegrees = Math.Round(pos.Lon, 4);
+            await Save();
+        }
+        catch (Exception ex)
+        {
+            _geoError = ex.Message;
+        }
+        finally
+        {
+            _geoLoading = false;
+        }
+    }
+
+    private void SelectLocation(ObservationLocation loc)
+    {
+        _editLoc = loc;
+        _prevLocName = loc.Name;
+    }
+
+    private async Task OnLocationNameChanged(ChangeEventArgs e)
+    {
+        var newName = e.Value?.ToString()?.Trim() ?? "";
+        if (string.IsNullOrEmpty(newName)) return;
+        if (_settings!.ActiveLocationName == _prevLocName)
+            _settings.ActiveLocationName = newName;
+        _editLoc!.Name = newName;
+        _prevLocName = newName;
+        await Save();
+    }
+
+    private async Task OnBortleChanged(ChangeEventArgs e)
+    {
+        var s = e.Value?.ToString();
+        _editLoc!.BortleClass = string.IsNullOrEmpty(s) ? null : int.Parse(s);
+        await Save();
+    }
+
+    private async Task AddLocation()
+    {
+        var loc = new ObservationLocation { Name = UniqueName("Location", _settings!.Locations.Select(l => l.Name)) };
+        _settings!.Locations.Add(loc);
+        SelectLocation(loc);
+        await Save();
+    }
+
+    private async Task DeleteLocation()
+    {
+        if (_editLoc == null || _settings!.Locations.Count <= 1) return;
+        bool wasActive = _editLoc.Name == _settings.ActiveLocationName;
+        _settings.Locations.Remove(_editLoc);
+        _editLoc = _settings.Locations.FirstOrDefault();
+        if (_editLoc != null) _prevLocName = _editLoc.Name;
+        if (wasActive) _settings.ActiveLocationName = _editLoc?.Name ?? "";
+        await Save();
+    }
+
+    private async Task SetActiveLocation()
+    {
+        _settings!.ActiveLocationName = _editLoc!.Name;
+        await Save();
+    }
+
+    private async Task OnHorizonFileSelected(InputFileChangeEventArgs e)
+    {
+        try
+        {
+            using var stream = e.File.OpenReadStream(maxAllowedSize: 512 * 1024);
+            using var reader = new StreamReader(stream);
+            var text = await reader.ReadToEndAsync();
+            _editLoc!.Horizon = HorizonProfile.ParseStellariumFormat(e.File.Name, text);
+            await Save();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[Settings] Horizon import error: {ex.Message}");
+        }
+    }
+
+    private async Task ResetHorizon()
+    {
+        _editLoc!.Horizon = HorizonProfile.Flat();
+        _showHorizonPaste = false;
+        await Save();
+    }
+
+    private void ToggleHorizonPaste()
+    {
+        _showHorizonPaste = !_showHorizonPaste;
+        if (_showHorizonPaste)
+            _horizonPasteText = SerializeHorizonToText(_editLoc!.Horizon);
+    }
+
+    private async Task ApplyHorizonPaste()
+    {
+        if (string.IsNullOrWhiteSpace(_horizonPasteText)) return;
+        _editLoc!.Horizon = HorizonProfile.ParseStellariumFormat("Custom", _horizonPasteText);
+        _showHorizonPaste = false;
+        await Save();
+    }
+
+    private static string SerializeHorizonToText(HorizonProfile p)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var pt in p.Points)
+            sb.AppendLine($"{pt.Az.ToString("F1", CultureInfo.InvariantCulture)} {pt.Alt.ToString("F1", CultureInfo.InvariantCulture)}");
+        return sb.ToString();
+    }
+
+    // ── Imaging setups ────────────────────────────────────────────────────────
+
+    private async Task AddImagingSetup()
+    {
+        var setup = new ImagingSetup { Name = UniqueName("Setup", _settings!.ImagingSetups.Select(s => s.Name)) };
+        _settings!.ImagingSetups.Add(setup);
+        _editSetup = setup;
+        await Save();
+    }
+
+    private async Task DeleteImagingSetup()
+    {
+        if (_editSetup == null) return;
+        _settings!.ImagingSetups.Remove(_editSetup);
+        _editSetup = _settings.ImagingSetups.FirstOrDefault();
+        await Save();
+    }
+
+    // ── General ───────────────────────────────────────────────────────────────
+
+    private async Task ExportSettings()
+    {
+        var json = JsonSerializer.Serialize(_settings, new JsonSerializerOptions { WriteIndented = true });
+        await JS.InvokeVoidAsync("downloadText", "astro-settings.json", json);
+    }
+
+    private async Task ImportSettings(InputFileChangeEventArgs e)
+    {
+        _importError = null;
+        try
+        {
+            using var stream = e.File.OpenReadStream(maxAllowedSize: 2 * 1024 * 1024);
+            using var reader = new StreamReader(stream);
+            var json = await reader.ReadToEndAsync();
+            var imported = JsonSerializer.Deserialize<AppSettings>(json,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (imported == null) { _importError = "Invalid settings file."; return; }
+            imported.MigrateIfNeeded();
+            _settings = imported;
+            await SettingsService.SaveAsync(_settings);
+            PlannerState.Invalidate();
+            _editLoc = _settings.GetActiveLocation();
+            if (_editLoc != null) _prevLocName = _editLoc.Name;
+            _editSetup = _settings.ImagingSetups.FirstOrDefault();
+        }
+        catch (Exception ex)
+        {
+            _importError = $"Import failed: {ex.Message}";
+        }
+    }
+
+    // ── SVG helpers ───────────────────────────────────────────────────────────
+
+    private static string GetHorizonPolyline(HorizonProfile p)
+    {
+        const double maxAlt = 45.0, range = 50.0, svgH = 60.0;
+        var sb = new System.Text.StringBuilder();
+        for (int az = 0; az <= 360; az++)
+        {
+            double alt = p.GetAltitudeAt(az % 360);
+            double y = Math.Clamp((maxAlt - alt) / range * svgH, 0, svgH);
+            if (sb.Length > 0) sb.Append(' ');
+            sb.Append(az);
+            sb.Append(',');
+            sb.Append(y.ToString("F1", CultureInfo.InvariantCulture));
+        }
+        return sb.ToString();
+    }
+
+    private static string GetHorizonFillPath(HorizonProfile p)
+    {
+        const double maxAlt = 45.0, range = 50.0, svgH = 60.0;
+        var sb = new System.Text.StringBuilder();
+        for (int az = 0; az <= 360; az++)
+        {
+            double alt = p.GetAltitudeAt(az % 360);
+            double y = Math.Clamp((maxAlt - alt) / range * svgH, 0, svgH);
+            if (az == 0)
+            {
+                sb.Append("M0,");
+                sb.Append(y.ToString("F1", CultureInfo.InvariantCulture));
+            }
+            else
+            {
+                sb.Append(" L");
+                sb.Append(az);
+                sb.Append(',');
+                sb.Append(y.ToString("F1", CultureInfo.InvariantCulture));
+            }
+        }
+        sb.Append(" L360,60 L0,60 Z");
+        return sb.ToString();
+    }
+
+    // ── Utilities ─────────────────────────────────────────────────────────────
+
+    private static double ParseDouble(object? value)
+    {
+        var s = value?.ToString() ?? "";
+        if (double.TryParse(s, System.Globalization.NumberStyles.Float,
+                CultureInfo.InvariantCulture, out var d)) return d;
+        if (double.TryParse(s, System.Globalization.NumberStyles.Float,
+                CultureInfo.CurrentCulture, out d)) return d;
+        return 0;
+    }
+
+    private static string UniqueName(string prefix, IEnumerable<string> existing)
+    {
+        var set = new HashSet<string>(existing);
+        if (!set.Contains(prefix)) return prefix;
+        for (int i = 2; i < 100; i++)
+        {
+            var name = $"{prefix} {i}";
+            if (!set.Contains(name)) return name;
+        }
+        return $"{prefix} {Guid.NewGuid().ToString("N")[..6]}";
+    }
+
+    private static string BortleLabel(int b) => b switch
+    {
+        1 => "Excellent dark sky",
+        2 => "Truly dark sky",
+        3 => "Rural sky",
+        4 => "Rural/suburban transition",
+        5 => "Suburban sky",
+        6 => "Bright suburban",
+        7 => "Suburban/urban transition",
+        8 => "City sky",
+        9 => "Inner-city sky",
+        _ => ""
+    };
+
+    private record GeoPosition(
+        [property: System.Text.Json.Serialization.JsonPropertyName("lat")] double Lat,
+        [property: System.Text.Json.Serialization.JsonPropertyName("lon")] double Lon);
+
+    private static readonly IReadOnlyDictionary<string, string[]> TimezoneGroups =
+        new Dictionary<string, string[]>
+        {
+            ["UTC"]       = [],
+            ["Africa"]    = [
+                "Africa/Abidjan", "Africa/Accra", "Africa/Addis_Ababa", "Africa/Algiers",
+                "Africa/Cairo", "Africa/Casablanca", "Africa/Johannesburg", "Africa/Khartoum",
+                "Africa/Lagos", "Africa/Nairobi", "Africa/Tripoli", "Africa/Tunis",
+            ],
+            ["America"]   = [
+                "America/Anchorage", "America/Argentina/Buenos_Aires", "America/Bogota",
+                "America/Caracas", "America/Chicago", "America/Denver", "America/Halifax",
+                "America/Havana", "America/Honolulu", "America/Indiana/Indianapolis",
+                "America/Lima", "America/Los_Angeles", "America/Mexico_City",
+                "America/Montevideo", "America/New_York", "America/Phoenix",
+                "America/Santiago", "America/Sao_Paulo", "America/St_Johns",
+                "America/Toronto", "America/Vancouver",
+            ],
+            ["Asia"]      = [
+                "Asia/Almaty", "Asia/Amman", "Asia/Baku", "Asia/Bangkok", "Asia/Beirut",
+                "Asia/Colombo", "Asia/Dhaka", "Asia/Dubai", "Asia/Ho_Chi_Minh",
+                "Asia/Hong_Kong", "Asia/Jakarta", "Asia/Jerusalem", "Asia/Kabul",
+                "Asia/Karachi", "Asia/Kathmandu", "Asia/Kolkata", "Asia/Kuala_Lumpur",
+                "Asia/Kuwait", "Asia/Manila", "Asia/Muscat", "Asia/Qatar", "Asia/Riyadh",
+                "Asia/Seoul", "Asia/Shanghai", "Asia/Singapore", "Asia/Taipei",
+                "Asia/Tehran", "Asia/Tokyo", "Asia/Ulaanbaatar", "Asia/Yangon",
+            ],
+            ["Atlantic"]  = [
+                "Atlantic/Azores", "Atlantic/Cape_Verde", "Atlantic/Reykjavik",
+                "Atlantic/South_Georgia",
+            ],
+            ["Australia"] = [
+                "Australia/Adelaide", "Australia/Brisbane", "Australia/Darwin",
+                "Australia/Hobart", "Australia/Melbourne", "Australia/Perth", "Australia/Sydney",
+            ],
+            ["Europe"]    = [
+                "Europe/Amsterdam", "Europe/Athens", "Europe/Belgrade", "Europe/Berlin",
+                "Europe/Brussels", "Europe/Bucharest", "Europe/Budapest",
+                "Europe/Copenhagen", "Europe/Dublin", "Europe/Helsinki",
+                "Europe/Istanbul", "Europe/Kyiv", "Europe/Lisbon", "Europe/London",
+                "Europe/Madrid", "Europe/Moscow", "Europe/Oslo", "Europe/Paris",
+                "Europe/Prague", "Europe/Rome", "Europe/Sofia", "Europe/Stockholm",
+                "Europe/Vienna", "Europe/Warsaw", "Europe/Zurich",
+            ],
+            ["Indian"]    = [
+                "Indian/Maldives", "Indian/Mauritius",
+            ],
+            ["Pacific"]   = [
+                "Pacific/Auckland", "Pacific/Fiji", "Pacific/Guam", "Pacific/Honolulu",
+                "Pacific/Noumea", "Pacific/Pago_Pago", "Pacific/Tahiti", "Pacific/Tongatapu",
+            ],
+        };
+}

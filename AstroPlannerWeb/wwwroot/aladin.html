@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AstroPlanner — Aladin</title>
+    <link rel="stylesheet" href="https://aladin.cds.unistra.fr/AladinLite/api/v3/latest/aladin.min.css" />
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background: #0d0d1a;
+            color: #d8d8e8;
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        #info-bar {
+            height: 40px;
+            display: flex;
+            align-items: center;
+            padding: 0 14px;
+            gap: 16px;
+            background: #111122;
+            border-bottom: 1px solid #1e1e3a;
+            font-size: 13px;
+            flex-shrink: 0;
+            overflow: hidden;
+        }
+
+        #obj-name { color: #a0c0f8; font-weight: 600; white-space: nowrap; }
+
+        #setup-legends { display: flex; gap: 14px; flex-wrap: nowrap; overflow: hidden; }
+
+        .setup-legend {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            white-space: nowrap;
+        }
+
+        .setup-swatch {
+            width: 14px;
+            height: 3px;
+            border-radius: 2px;
+            flex-shrink: 0;
+        }
+
+        .setup-label { font-size: 0.78rem; color: #9090b8; }
+        .setup-label.best { color: #d0d0f0; }
+
+        #aladin-lite-div { flex: 1; min-height: 0; }
+    </style>
+</head>
+<body>
+    <div id="info-bar">
+        <span id="obj-name"></span>
+        <div id="setup-legends"></div>
+    </div>
+    <div id="aladin-lite-div"></div>
+
+    <script type="text/javascript"
+            src="https://aladin.cds.unistra.fr/AladinLite/api/v3/latest/aladin.js"
+            charset="utf-8"></script>
+    <script>
+        const params  = new URLSearchParams(window.location.search);
+        const ra      = parseFloat(params.get('ra')       || '0');
+        const dec     = parseFloat(params.get('dec')      || '0');
+        const objName = params.get('name')                || '';
+        const objSize = parseFloat(params.get('obj_size') || '0'); // arcmin
+        const setups  = JSON.parse(params.get('setups')   || '[]');
+
+        // FOV box colors — best gets first (green), rest are secondary
+        const COLORS = ['#4aff7f', '#ffcc44', '#44ccff', '#ff8844'];
+
+        // Populate info bar
+        document.getElementById('obj-name').textContent =
+            objName || `RA ${ra.toFixed(3)}  Dec ${dec.toFixed(3)}`;
+
+        const legendsEl = document.getElementById('setup-legends');
+        setups.forEach((s, i) => {
+            const color = COLORS[i % COLORS.length];
+            const div   = document.createElement('div');
+            div.className = 'setup-legend';
+            div.innerHTML =
+                `<div class="setup-swatch" style="background:${color}"></div>` +
+                `<span class="setup-label${s.best ? ' best' : ''}">${s.name}</span>`;
+            legendsEl.appendChild(div);
+        });
+
+        // Auto-zoom: show sensor frame plus ~50% context padding
+        function autoZoomDeg() {
+            if (setups.length > 0) {
+                const s    = setups.find(x => x.best) || setups[0];
+                const diag = Math.sqrt(s.w * s.w + s.h * s.h); // arcmin
+                return Math.min(Math.max(diag * 2.5 / 60, 0.25), 4.0);
+            }
+            if (objSize > 0)
+                return Math.min(Math.max(objSize * 4 / 60, 0.25), 4.0);
+            return 1.0;
+        }
+
+        A.init.then(() => {
+            const aladin = A.aladin('#aladin-lite-div', {
+                survey:               'P/DSS2/color',
+                target:               `${ra} ${dec}`,
+                fov:                  autoZoomDeg(),
+                showReticle:          true,
+                showZoomControl:      true,
+                showFullscreenControl:true,
+                showLayersControl:    true,
+                showGotoControl:      true,
+                showShareControl:     false,
+            });
+
+            const cosDec = Math.cos(dec * Math.PI / 180);
+
+            setups.forEach((s, i) => {
+                const color   = COLORS[i % COLORS.length];
+                const overlay = A.graphicOverlay({ color, lineWidth: s.best ? 2.5 : 1.5 });
+                aladin.addOverlay(overlay);
+
+                const hw = (s.w / 60 / 2) / cosDec; // half-width in RA degrees
+                const hh =  s.h / 60 / 2;            // half-height in Dec degrees
+
+                // Closed rectangle
+                overlay.add(A.polyline([
+                    [ra - hw, dec - hh],
+                    [ra + hw, dec - hh],
+                    [ra + hw, dec + hh],
+                    [ra - hw, dec + hh],
+                    [ra - hw, dec - hh],
+                ]));
+            });
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,598 @@
+@inject CatalogService CatalogService
+@inject SettingsService SettingsService
+@inject VisibilityService VisibilityService
+@inject PlannerStateService PlannerState
+@inject IJSRuntime JS
+@using System.Globalization
+@using AstroPlannerWeb.Models
+@using AstroPlannerWeb.Services
+
+<div class="object-detail">
+    @if (_loading)
+    {
+        <div class="obj-loading">Loading…</div>
+    }
+    else if (_obj == null)
+    {
+        <div class="obj-not-found">
+            <button class="back-btn" @onclick="Close">✕ Close</button>
+            <p>Object not found: @ObjectName</p>
+        </div>
+    }
+    else
+    {
+        <div class="obj-header-row">
+            <button class="back-btn" @onclick="Close">✕ Close</button>
+            <div class="obj-actions">
+                <button class="action-btn @(_isFavorite ? "action-fav-on" : "")" @onclick="ToggleFavorite">
+                    @(_isFavorite ? "♥" : "♡") Favorite
+                </button>
+                @if (_imagedOn.HasValue)
+                {
+                    <button class="action-btn action-imaged" @onclick="ClearImaged">
+                        ✓ Imaged @_imagedOn.Value.ToString("yyyy-MM-dd")
+                    </button>
+                }
+                else
+                {
+                    <button class="action-btn" @onclick="MarkImaged">Mark Imaged</button>
+                }
+                <button class="action-btn action-link" @onclick="OpenAladin">Aladin</button>
+                <a class="action-btn action-link" href="@_astroBinUrl" target="_blank" rel="noreferrer">AstroBin</a>
+            </div>
+        </div>
+
+        <div class="obj-body">
+            <!-- Main column: title, visibility, chart, catalog, score -->
+            <div class="obj-main-col">
+                <div class="obj-title-block">
+                    <h2 class="obj-name">@_obj.DisplayName</h2>
+                    <span class="obj-meta">@_obj.CatalogIds · @_obj.Type.ToDisplayString() · @_obj.Constellation</span>
+                </div>
+
+                <div class="vis-summary-bar">
+                    @if (_vis?.IsVisible == true)
+                    {
+                        <span class="vis-item">
+                            <span class="vis-label">Visible</span>
+                            @_visWindow
+                        </span>
+                        <span class="vis-sep">|</span>
+                        <span class="vis-item">
+                            <span class="vis-label">Peak</span>
+                            @((int)_vis.PeakAltitudeDegrees)° at @FormatLocalTime(_vis.PeakTime)
+                        </span>
+                        <span class="vis-sep">|</span>
+                        <span class="vis-item">
+                            <span class="vis-label">Moon</span>
+                            @((int)_vis.MoonSeparationDegrees)° sep
+                        </span>
+                        @if (_breakdown != null)
+                        {
+                            <span class="vis-sep">|</span>
+                            <span class="vis-item">
+                                <span class="vis-label">Score</span>
+                                <span class="@VisibilityScorer.ScoreCssClass(_breakdown.Total)">@_breakdown.Total.ToString("F0", CultureInfo.InvariantCulture)</span>
+                            </span>
+                        }
+                    }
+                    else if (_vis?.IsComputed == true)
+                    {
+                        <span class="vis-none">Not visible tonight</span>
+                    }
+                    else
+                    {
+                        <span class="vis-none">No visibility data — configure a location in Settings</span>
+                    }
+                </div>
+
+                @if (_samples.Count > 1)
+                {
+                    <div class="alt-chart-section">
+                        <div class="alt-chart-wrap">
+                            <div class="alt-y-labels">
+                                <span>90°</span>
+                                <span>60°</span>
+                                <span>30°</span>
+                                <span>0°</span>
+                            </div>
+                            <div class="alt-chart-area">
+                                <svg class="alt-chart" viewBox="0 0 600 90" preserveAspectRatio="none">
+                                    <line x1="0" y1="30" x2="600" y2="30" class="alt-grid" />
+                                    <line x1="0" y1="60" x2="600" y2="60" class="alt-grid" />
+                                    @if (_nowXStr != null)
+                                    {
+                                        <line x1="@_nowXStr" y1="0" x2="@_nowXStr" y2="90" class="alt-now" />
+                                    }
+                                    @if (!string.IsNullOrEmpty(_fullCurvePoints))
+                                    {
+                                        <polyline class="alt-curve-dim" points="@_fullCurvePoints" />
+                                    }
+                                    @foreach (var seg in _segsBright)
+                                    {
+                                        <polyline class="alt-curve-bright" points="@seg" />
+                                    }
+                                    @if (!string.IsNullOrEmpty(_horizonPoints))
+                                    {
+                                        <polyline class="alt-horizon-line" points="@_horizonPoints" />
+                                    }
+                                </svg>
+                                <div class="alt-time-labels">
+                                    @foreach (var lbl in _timeLabels)
+                                    {
+                                        <span class="alt-time-lbl" style="left:@lbl.Pct.ToString("F1", CultureInfo.InvariantCulture)%">@lbl.Text</span>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                }
+
+                @if (_yearlyScores != null)
+                {
+                    <div class="yearly-heatmap">
+                        <div class="detail-section-header">Best Months — @_date.Year</div>
+                        <div class="heatmap-row">
+                            @foreach (var (score, idx) in _yearlyScores.Select((s, i) => (s, i)))
+                            {
+                                var monthName = new DateTime(_date.Year, idx + 1, 1).ToString("MMM");
+                                <div class="heat-cell" style="background:@HeatColor(score)" title="@monthName: @((int)score)">
+                                    <span class="heat-month">@monthName</span>
+                                    <span class="heat-score">@(score > 0 ? ((int)score).ToString() : "–")</span>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+
+                <div class="obj-detail-columns">
+                    <div class="obj-catalog-info">
+                        <div class="detail-section-header">Catalog</div>
+                        <div class="catalog-grid">
+                            <span class="cg-label">Type</span>
+                            <span class="cg-value">@_obj.Type.ToDisplayString()</span>
+
+                            <span class="cg-label">Constellation</span>
+                            <span class="cg-value">@_obj.Constellation</span>
+
+                            <span class="cg-label">Magnitude (V)</span>
+                            <span class="cg-value">@(_obj.MagnitudeV.HasValue ? _obj.MagnitudeV.Value.ToString("F1") : "–")</span>
+
+                            @if (_obj.MagnitudeB.HasValue && !_obj.MagnitudeV.HasValue)
+                            {
+                                <span class="cg-label">Magnitude (B)</span>
+                                <span class="cg-value">@_obj.MagnitudeB.Value.ToString("F1")</span>
+                            }
+
+                            @if (!string.IsNullOrEmpty(_obj.SizeDisplay))
+                            {
+                                <span class="cg-label">Size</span>
+                                <span class="cg-value">@_obj.SizeDisplay</span>
+                            }
+
+                            @if (_obj.SurfaceBrightness.HasValue)
+                            {
+                                <span class="cg-label">Surface Brightness</span>
+                                <span class="cg-value">@_obj.SurfaceBrightness.Value.ToString("F1") mag/sq″</span>
+                            }
+
+                            @if (!string.IsNullOrEmpty(_obj.HubbleType))
+                            {
+                                <span class="cg-label">Hubble Type</span>
+                                <span class="cg-value">@_obj.HubbleType</span>
+                            }
+
+                            <span class="cg-label">RA (J2000)</span>
+                            <span class="cg-value">@FormatRa(_obj.RaDegrees)</span>
+
+                            <span class="cg-label">Dec (J2000)</span>
+                            <span class="cg-value">@FormatDec(_obj.DecDegrees)</span>
+                        </div>
+                    </div>
+
+                    @if (_breakdown != null)
+                    {
+                        <div class="obj-score-breakdown">
+                            <div class="detail-section-header">Score Breakdown</div>
+
+                            <div class="score-bar-row">
+                                <span class="score-bar-label">Vis. Fraction</span>
+                                <div class="score-bar-track">
+                                    <div class="score-bar-fill" style="width:@(Math.Clamp(_breakdown.FracEarned / 15.0 * 100, 0, 100).ToString("F0", CultureInfo.InvariantCulture))%"></div>
+                                </div>
+                                <span class="score-bar-value">@_breakdown.FracEarned.ToString("F1") / 15</span>
+                            </div>
+                            <div class="score-bar-row">
+                                <span class="score-bar-label">Duration</span>
+                                <div class="score-bar-track">
+                                    <div class="score-bar-fill" style="width:@(Math.Clamp(_breakdown.DurEarned / 10.0 * 100, 0, 100).ToString("F0", CultureInfo.InvariantCulture))%"></div>
+                                </div>
+                                <span class="score-bar-value">@_breakdown.DurEarned.ToString("F1") / 10</span>
+                            </div>
+                            <div class="score-bar-row">
+                                <span class="score-bar-label">Avg Altitude</span>
+                                <div class="score-bar-track">
+                                    <div class="score-bar-fill" style="width:@(Math.Clamp(_breakdown.AltEarned / 20.0 * 100, 0, 100).ToString("F0", CultureInfo.InvariantCulture))%"></div>
+                                </div>
+                                <span class="score-bar-value">@_breakdown.AltEarned.ToString("F1") / 20</span>
+                            </div>
+                            <div class="score-bar-row">
+                                <span class="score-bar-label">Moon Sep.</span>
+                                <div class="score-bar-track">
+                                    <div class="score-bar-fill" style="width:@(Math.Clamp(_breakdown.MoonEarned / 20.0 * 100, 0, 100).ToString("F0", CultureInfo.InvariantCulture))%"></div>
+                                </div>
+                                <span class="score-bar-value">@_breakdown.MoonEarned.ToString("F1") / 20</span>
+                            </div>
+                            <div class="score-bar-row">
+                                <span class="score-bar-label">Brightness</span>
+                                <div class="score-bar-track">
+                                    <div class="score-bar-fill" style="width:@(Math.Clamp(_breakdown.BrightEarned / 15.0 * 100, 0, 100).ToString("F0", CultureInfo.InvariantCulture))%"></div>
+                                </div>
+                                <span class="score-bar-value">@_breakdown.BrightEarned.ToString("F1") / 15</span>
+                            </div>
+                            <div class="score-bar-row">
+                                <span class="score-bar-label">Object Size</span>
+                                <div class="score-bar-track">
+                                    <div class="score-bar-fill" style="width:@(Math.Clamp(_breakdown.SizeEarned / 10.0 * 100, 0, 100).ToString("F0", CultureInfo.InvariantCulture))%"></div>
+                                </div>
+                                <span class="score-bar-value">@_breakdown.SizeEarned.ToString("F1") / 10</span>
+                            </div>
+                            <div class="score-bar-row">
+                                <span class="score-bar-label">Peak Alt.</span>
+                                <div class="score-bar-track">
+                                    <div class="score-bar-fill" style="width:@(Math.Clamp(_breakdown.PeakEarned / 10.0 * 100, 0, 100).ToString("F0", CultureInfo.InvariantCulture))%"></div>
+                                </div>
+                                <span class="score-bar-value">@_breakdown.PeakEarned.ToString("F1") / 10</span>
+                            </div>
+
+                            <div class="score-total-row">
+                                <span class="score-total-label">Total</span>
+                                <span class="score-total-value @VisibilityScorer.ScoreCssClass(_breakdown.Total)">
+                                    @_breakdown.Total.ToString("F0", CultureInfo.InvariantCulture) / 100
+                                </span>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <!-- Right sidebar: survey image + setup cards -->
+            <div class="obj-right-col">
+                <div class="obj-survey-wrap" id="survey-wrap">
+                    <img class="obj-survey-img" src="@_surveyImageUrl"
+                         alt="@_obj.DisplayName DSS survey image"
+                         onerror="document.getElementById('survey-wrap').style.display='none'" />
+                    <span class="obj-survey-label">DSS2 Color</span>
+                </div>
+
+                @if (_fovResults.Count > 0)
+                {
+                    <div class="setup-cards">
+                        <div class="detail-section-header">Imaging Setups</div>
+                        @foreach (var r in _fovResults)
+                        {
+                            <div class="setup-card @(r.IsBest ? "setup-card-best" : "")">
+                                <div class="setup-card-name">@(r.IsBest ? "★ " : "")@r.GearLabel</div>
+                                <div class="setup-card-row">
+                                    <div class="setup-card-field">
+                                        <span class="setup-card-lbl">Plate Scale</span>
+                                        <span class="setup-card-scale">@r.PlateScaleDisplay</span>
+                                    </div>
+                                    <div class="setup-card-field">
+                                        <span class="setup-card-lbl">Fill</span>
+                                        <span class="setup-card-fill @(!r.FitsInFrame ? "fov-too-large" : "")">@r.FillDisplay@(!r.FitsInFrame ? " ↑" : "")</span>
+                                    </div>
+                                </div>
+                                <div class="setup-card-field">
+                                    <span class="setup-card-lbl">FOV</span>
+                                    <span class="setup-card-fov">@r.FovDisplay</span>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@if (_showAladin && _obj != null)
+{
+    <div class="aladin-overlay" @onclick="CloseAladin">
+        <div class="aladin-modal" @onclick:stopPropagation="true">
+            <div class="aladin-modal-bar">
+                <span class="aladin-modal-title">@_obj.DisplayName</span>
+                @foreach (var (r, i) in _fovResults.Select((r, i) => (r, i)))
+                {
+                    <span class="aladin-legend">
+                        <span class="aladin-swatch" style="background:@_aladinColors[i % _aladinColors.Length]"></span>
+                        <span>@r.GearLabel</span>
+                    </span>
+                }
+                <button class="aladin-close-btn" @onclick="CloseAladin">✕</button>
+            </div>
+            <div id="aladin-lite-div" class="aladin-viewer"></div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public string ObjectName { get; set; } = "";
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback<string> OnAnnotationChanged { get; set; }
+
+    DeepSkyObject? _obj;
+    AppSettings? _settings;
+    ObservationLocation? _location;
+    VisibilityWindow? _vis;
+    ScoreBreakdown? _breakdown;
+    List<SetupFovResult> _fovResults = [];
+    bool _isFavorite;
+    DateOnly? _imagedOn;
+    bool _loading = true;
+    DateOnly _date;
+
+    string _visWindow = "";
+    string _astroBinUrl = "#";
+    string _surveyImageUrl = "";
+
+    bool _showAladin;
+    bool _aladinNeedsInit;
+    static readonly string[] _aladinColors = ["#4aff7f", "#ffcc44", "#44ccff", "#ff8844"];
+
+    List<(DateTime Time, double Alt, double HorizAlt, double Az)> _samples = [];
+    string _fullCurvePoints = "";
+    List<string> _segsBright = [];
+    string _horizonPoints = "";
+    string? _nowXStr;
+    List<(double Pct, string Text)> _timeLabels = [];
+
+    double[]? _yearlyScores;
+    string _loadedName = "";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ObjectName == _loadedName) return;
+        _loadedName = ObjectName;
+
+        _obj = null; _vis = null; _breakdown = null; _yearlyScores = null;
+        _fovResults = []; _isFavorite = false; _imagedOn = null;
+        _loading = true; _visWindow = ""; _astroBinUrl = "#"; _surveyImageUrl = "";
+        _samples = []; _fullCurvePoints = ""; _segsBright = []; _horizonPoints = "";
+        _nowXStr = null; _timeLabels = []; _showAladin = false; _aladinNeedsInit = false;
+
+        _settings = await SettingsService.LoadAsync();
+        _location = _settings.GetActiveLocation();
+        await CatalogService.EnsureLoadedAsync();
+
+        _obj = CatalogService.GetAll().FirstOrDefault(o => o.Name == ObjectName);
+        if (_obj == null) { _loading = false; return; }
+
+        _date = PlannerState.CachedDate ?? DateOnly.FromDateTime(DateTime.Today);
+
+        var cached = PlannerState.GetRow(_obj.Name);
+        if (cached != null)
+        {
+            _vis = cached.Window;
+        }
+        else if (_location != null)
+        {
+            var site = _location.ToSite();
+            var (darkStart, darkEnd) = AstronomyService.GetAstronomicalDarkness(_date, site);
+            var midNight = darkStart + (darkEnd - darkStart) / 2;
+            var (moonRa, moonDec, moonIllum) = AstronomyService.GetMoonPosition(midNight);
+            int step = _settings.VisibilityStepMinutes;
+            var tList = new List<DateTime>();
+            for (var t = darkStart; t <= darkEnd; t = t.AddMinutes(step))
+                tList.Add(t);
+            var arr = tList.ToArray();
+            var lst = AstronomyService.ComputeLstHours(arr, site.LongitudeDegrees);
+            _vis = VisibilityService.ComputeDsoFast(
+                _obj, darkStart, darkEnd, arr, lst,
+                site.LatitudeDegrees, _location.Horizon, step,
+                (moonRa, moonDec, moonIllum));
+        }
+
+        _breakdown = _vis != null ? VisibilityScorer.ComputeBreakdown(_obj, _vis) : null;
+
+        if (_settings.Annotations.TryGetValue(_obj.Name, out var ann))
+        {
+            _isFavorite = ann.IsFavorite;
+            _imagedOn = ann.ImagedOn;
+        }
+
+        if (_obj.MajorAxisArcmin is double maj && maj > 0 && _settings.ImagingSetups.Count > 0)
+            _fovResults = SetupFovResult.Compute(_settings.ImagingSetups, maj);
+
+        _visWindow   = BuildVisWindow();
+        _astroBinUrl = $"https://www.astrobin.com/search/?q={Uri.EscapeDataString(_obj.DisplayName)}";
+
+        double fovDeg = Math.Min(Math.Max((_obj.MajorAxisArcmin ?? 20) * 2.5, 20), 120) / 60.0;
+        _surveyImageUrl = "https://alasky.cds.unistra.fr/hips-image-services/hips2fits" +
+            "?hips=CDS%2FP%2FDSS2%2Fcolor" +
+            $"&ra={_obj.RaDegrees.ToString("F4", CultureInfo.InvariantCulture)}" +
+            $"&dec={_obj.DecDegrees.ToString("F4", CultureInfo.InvariantCulture)}" +
+            $"&fov={fovDeg.ToString("F3", CultureInfo.InvariantCulture)}" +
+            "&width=400&height=400&format=jpg&projection=TAN&coordsys=icrs";
+
+        if (_location != null)
+        {
+            _samples = VisibilityService.GetAltitudeSamples(
+                _ => (_obj.RaDegrees, _obj.DecDegrees),
+                _date, _location.ToSite(), _location.Horizon, 5);
+            _yearlyScores = VisibilityService.ComputeYearlyScores(_obj, _location, _date.Year);
+        }
+
+        BuildChartData();
+        _loading = false;
+    }
+
+    private void BuildChartData()
+    {
+        if (_samples.Count < 2) return;
+
+        var start = _samples[0].Time;
+        var end   = _samples[^1].Time;
+        double span = (end - start).TotalMinutes;
+        if (span <= 0) return;
+
+        string X(DateTime t) =>
+            ((t - start).TotalMinutes / span * 600).ToString("F1", CultureInfo.InvariantCulture);
+        string Y(double alt) =>
+            Math.Clamp(90 - alt, 0, 90).ToString("F1", CultureInfo.InvariantCulture);
+        double Pct(DateTime t) => (t - start).TotalMinutes / span * 100;
+
+        var utcNow = DateTime.UtcNow;
+        if (utcNow >= start && utcNow <= end)
+            _nowXStr = ((utcNow - start).TotalMinutes / span * 600).ToString("F1", CultureInfo.InvariantCulture);
+
+        _fullCurvePoints = string.Join(" ", _samples.Select(s => $"{X(s.Time)},{Y(s.Alt)}"));
+        _horizonPoints   = string.Join(" ", _samples.Select(s => $"{X(s.Time)},{Y(s.HorizAlt)}"));
+
+        var bright = new List<string>();
+        var cur    = new List<string>();
+        bool lastAbove = false;
+
+        for (int i = 0; i < _samples.Count; i++)
+        {
+            var s     = _samples[i];
+            bool above = s.Alt > s.HorizAlt;
+            string pt  = $"{X(s.Time)},{Y(s.Alt)}";
+
+            if (i == 0) { cur.Add(pt); lastAbove = above; }
+            else if (above == lastAbove) { cur.Add(pt); }
+            else
+            {
+                if (cur.Count >= 2 && lastAbove) bright.Add(string.Join(" ", cur));
+                cur.Clear();
+                cur.Add(pt);
+                lastAbove = above;
+            }
+        }
+        if (cur.Count >= 2 && lastAbove) bright.Add(string.Join(" ", cur));
+        _segsBright = bright;
+
+        _timeLabels = [];
+        var cursor = new DateTime(start.Year, start.Month, start.Day, start.Hour, 0, 0, DateTimeKind.Utc)
+            .AddHours(1);
+        while (cursor < start) cursor = cursor.AddHours(1);
+        while (cursor <= end)
+        {
+            _timeLabels.Add((Pct(cursor), FormatLocalTime(cursor)));
+            cursor = cursor.AddHours(2);
+        }
+    }
+
+    private string BuildVisWindow()
+    {
+        if (_vis?.IsVisible != true) return "";
+        var rise = _vis.RiseTime ?? _vis.DarkWindowStart;
+        var set  = _vis.SetTime  ?? _vis.DarkWindowEnd;
+        return $"{FormatLocalTime(rise)} – {FormatLocalTime(set)}";
+    }
+
+    private void OpenAladin()  { _showAladin = true;  _aladinNeedsInit = true; }
+    private void CloseAladin() { _showAladin = false; }
+    private Task Close()       => OnClose.InvokeAsync();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_aladinNeedsInit && _showAladin && _obj != null)
+        {
+            _aladinNeedsInit = false;
+            var setupsJson = System.Text.Json.JsonSerializer.Serialize(
+                _fovResults.Select((r, i) => new
+                {
+                    name  = r.GearLabel,
+                    w     = Math.Round(r.WidthArcmin, 1),
+                    h     = Math.Round(r.HeightArcmin, 1),
+                    best  = r.IsBest,
+                    color = _aladinColors[i % _aladinColors.Length]
+                }));
+            await JS.InvokeVoidAsync("initAladinViewer",
+                "aladin-lite-div",
+                _obj.RaDegrees,
+                _obj.DecDegrees,
+                setupsJson);
+        }
+    }
+
+    private string FormatLocalTime(DateTime utc)
+    {
+        try
+        {
+            var tz = _location?.GetTimeZone() ?? TimeZoneInfo.Utc;
+            return TimeZoneInfo.ConvertTimeFromUtc(utc, tz).ToString("HH:mm");
+        }
+        catch { return utc.ToString("HH:mm") + "Z"; }
+    }
+
+    private static string HeatColor(double score) => score switch
+    {
+        0    => "#0e0e18",
+        < 30 => "#3a1414",
+        < 50 => "#3a2808",
+        < 70 => "#2a3008",
+        < 85 => "#14381a",
+        _    => "#1a4828",
+    };
+
+    private static string FormatRa(double deg)
+    {
+        double total = deg / 15.0 * 3600;
+        int h = (int)(total / 3600);
+        int m = (int)((total % 3600) / 60);
+        double s = total % 60;
+        return $"{h:D2}h {m:D2}m {s:F1}s";
+    }
+
+    private static string FormatDec(double deg)
+    {
+        bool neg = deg < 0;
+        double abs = Math.Abs(deg);
+        int d = (int)abs;
+        int m = (int)((abs - d) * 60);
+        double s = ((abs - d) * 60 - m) * 60;
+        return $"{(neg ? "−" : "+")}{d:D2}° {m:D2}' {s:F0}\"";
+    }
+
+    private ObjectAnnotation GetOrCreateAnnotation(string name)
+    {
+        if (!_settings!.Annotations.TryGetValue(name, out var ann))
+        {
+            ann = new ObjectAnnotation();
+            _settings.Annotations[name] = ann;
+        }
+        return ann;
+    }
+
+    private async Task SaveAnnotation()
+    {
+        await SettingsService.SaveAsync();
+        await OnAnnotationChanged.InvokeAsync(_obj!.Name);
+    }
+
+    private async Task ToggleFavorite()
+    {
+        if (_obj == null || _settings == null) return;
+        _isFavorite = !_isFavorite;
+        GetOrCreateAnnotation(_obj.Name).IsFavorite = _isFavorite;
+        await SaveAnnotation();
+    }
+
+    private async Task MarkImaged()
+    {
+        if (_obj == null || _settings == null) return;
+        _imagedOn = DateOnly.FromDateTime(DateTime.Today);
+        GetOrCreateAnnotation(_obj.Name).ImagedOn = _imagedOn;
+        await SaveAnnotation();
+    }
+
+    private async Task ClearImaged()
+    {
+        if (_obj == null || _settings == null) return;
+        _imagedOn = null;
+        GetOrCreateAnnotation(_obj.Name).ImagedOn = null;
+        await SaveAnnotation();
+    }
+}
