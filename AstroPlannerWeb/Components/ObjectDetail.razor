@@ -488,8 +488,9 @@
                 _imagedOn = ann.ImagedOn;
             }
 
-            if (_obj.MajorAxisArcmin is double maj && maj > 0 && _settings.ImagingSetups.Count > 0)
+            if (_settings.ImagingSetups.Count > 0)
             {
+                double? maj = _obj.MajorAxisArcmin is double m && m > 0 ? m : null;
                 _fovResults = SetupFovResult.Compute(_settings.ImagingSetups, maj);
                 int? bortle = _location?.BortleClass;
                 _snrEstimates = _settings.ImagingSetups

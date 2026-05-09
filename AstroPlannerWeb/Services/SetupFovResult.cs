@@ -7,7 +7,7 @@ public record SetupFovResult(
     double WidthArcmin,
     double HeightArcmin,
     double PlateScaleArcsecPx,
-    double FillPercent,
+    double? FillPercent,   // null when object size is unknown
     bool IsBest)
 {
     public string GearLabel =>
@@ -19,28 +19,39 @@ public record SetupFovResult(
         $"{FovCalculator.FormatArcmin(WidthArcmin)} × {FovCalculator.FormatArcmin(HeightArcmin)}";
 
     public string PlateScaleDisplay => $"{PlateScaleArcsecPx:F2}\"/px";
-    public string FillDisplay => $"{FillPercent:F0}%";
-    public bool FitsInFrame => FillPercent <= 100;
+    public string FillDisplay => FillPercent.HasValue ? $"{FillPercent.Value:F0}%" : "–";
+    public bool FitsInFrame => !FillPercent.HasValue || FillPercent.Value <= 100;
 
+    /// <param name="objectMajorArcmin">Pass null when object size is unknown — setups still shown without fill or best-fit ranking.</param>
     public static List<SetupFovResult> Compute(
-        IReadOnlyList<ImagingSetup> setups, double objectMajorArcmin)
+        IReadOnlyList<ImagingSetup> setups, double? objectMajorArcmin)
     {
         var usable = setups.Where(FovCalculator.IsUsable).ToList();
-        if (usable.Count == 0 || objectMajorArcmin <= 0) return [];
+        if (usable.Count == 0) return [];
 
-        var best = FovCalculator.BestSetup(usable, objectMajorArcmin);
-        double target = FovCalculator.TargetFillPct(objectMajorArcmin);
+        ImagingSetup? best = objectMajorArcmin > 0
+            ? FovCalculator.BestSetup(usable, objectMajorArcmin.Value)
+            : null;
+        double? target = objectMajorArcmin > 0
+            ? FovCalculator.TargetFillPct(objectMajorArcmin.Value)
+            : null;
 
-        return usable
-            .Select(s =>
-            {
-                var (w, h) = FovCalculator.FovArcmin(s);
-                double ps = FovCalculator.PlateScaleArcsecPx(s.FocalLengthMm, s.PixelSizeMicrons);
-                double fill = FovCalculator.FillPercent(s, objectMajorArcmin);
-                return new SetupFovResult(s, w, h, ps, fill, s == best);
-            })
-            .OrderByDescending(r => r.IsBest)
-            .ThenBy(r => Math.Abs(r.FillPercent - target))
-            .ToList();
+        var results = usable.Select(s =>
+        {
+            var (w, h) = FovCalculator.FovArcmin(s);
+            double ps   = FovCalculator.PlateScaleArcsecPx(s.FocalLengthMm, s.PixelSizeMicrons);
+            double? fill = objectMajorArcmin > 0
+                ? FovCalculator.FillPercent(s, objectMajorArcmin.Value)
+                : null;
+            return new SetupFovResult(s, w, h, ps, fill, s == best);
+        });
+
+        if (target.HasValue)
+            return results
+                .OrderByDescending(r => r.IsBest)
+                .ThenBy(r => Math.Abs(r.FillPercent!.Value - target.Value))
+                .ToList();
+
+        return results.ToList();
     }
 }
