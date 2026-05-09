@@ -3,6 +3,7 @@
 @inject SettingsService SettingsService
 @inject VisibilityService VisibilityService
 @inject PlannerStateService PlannerState
+@inject YearlyStateService YearlyState
 @implements IDisposable
 
 <PageTitle>AstroPlanner</PageTitle>
@@ -330,6 +331,10 @@
                 .ThenBy(r => r.Object?.DisplayMagnitude ?? 0)];
 
             PlannerState.Store(_selectedDate, _activeLocationName, _allRows, _nightInfo);
+
+            // Pre-warm the yearly cache in the background while the user browses
+            _ = YearlyState.EnsureComputedAsync(
+                _selectedDate.Year, _activeLocationName, _settings!, CatalogService, VisibilityService);
 
             _loading = false;
             ApplyFilter();

@@ -280,7 +280,7 @@ main  { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
 .obj-list-header,
 .obj-row {
-    --obj-cols: 1.5fr 60px 55px 50px 80px 52px 70px 55px 46px;
+    --obj-cols: minmax(120px, 220px) 60px 55px 50px 80px 52px 70px 55px 46px;
     display: grid;
     grid-template-columns: var(--obj-cols);
     align-items: center;
@@ -1339,12 +1339,12 @@ main  { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
 .yearly-list-header,
 .yearly-row {
-    --yearly-cols: 1.5fr repeat(12, 40px);
+    --yearly-cols: minmax(120px, 220px) repeat(12, 40px);
     display: grid;
     grid-template-columns: var(--yearly-cols);
     align-items: center;
     padding: 0 8px;
-    gap: 3px;
+    gap: 2px;
     min-width: 640px;
 }
 
@@ -1367,9 +1367,9 @@ main  { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 }
 
 .yearly-row {
-    height: 32px;
+    height: 34px;
     cursor: pointer;
-    border-bottom: 1px solid #16162a;
+    border-bottom: 2px solid #0d0d1a;
     font-size: 0.8rem;
     transition: background 0.1s;
 }
@@ -1384,18 +1384,18 @@ main  { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .yearly-cell {
     text-align: center;
     font-size: 0.72rem;
-    font-weight: 500;
-    border-radius: 2px;
-    padding: 2px 0;
+    font-weight: 600;
+    border-radius: 3px;
+    padding: 3px 0;
+    background: #111120;
 }
 
-/* Dim the dash for invisible months; add subtle background tints for scored months */
-.yearly-cell.score-none     { color: #252535; }
-.yearly-cell.score-poor     { background: rgba(192,  80,  80, 0.09); }
-.yearly-cell.score-fair     { background: rgba(192, 128,  80, 0.11); }
-.yearly-cell.score-good     { background: rgba(176, 176,  64, 0.11); }
-.yearly-cell.score-great    { background: rgba(112, 200, 112, 0.13); }
-.yearly-cell.score-excellent{ background: rgba( 64, 216, 128, 0.16); }
+.yearly-cell.score-none     { color: #1e1e38; }
+.yearly-cell.score-poor     { background: rgba(160,  40,  40, 0.45); color: #f08080; }
+.yearly-cell.score-fair     { background: rgba(160, 100,  30, 0.45); color: #e0a060; }
+.yearly-cell.score-good     { background: rgba(140, 140,  30, 0.45); color: #d8d860; }
+.yearly-cell.score-great    { background: rgba( 40, 160,  60, 0.45); color: #70d880; }
+.yearly-cell.score-excellent{ background: rgba( 30, 180, 110, 0.50); color: #40e890; }
 
 .yearly-imaged { color: #50c880; font-size: 0.72rem; margin-right: 1px; }
 
@@ -1486,7 +1486,7 @@ main  { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 @media (max-width: 900px) {
     .obj-list-header,
     .obj-row {
-        --obj-cols: 1.5fr 60px 50px 52px 70px 55px 46px;
+        --obj-cols: minmax(120px, 220px) 60px 50px 52px 70px 55px 46px;
     }
 
     /* col 3 = Const, col 5 = Size */
