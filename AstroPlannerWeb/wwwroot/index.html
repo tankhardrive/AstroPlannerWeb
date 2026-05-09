@@ -49,10 +49,17 @@
         window.getBrowserTimezone = () =>
             Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
         window.getCurrentPosition = () => new Promise((resolve, reject) => {
-            if (!navigator.geolocation) { reject('Geolocation not supported'); return; }
+            if (!navigator.geolocation) { reject('Geolocation is not supported by this browser'); return; }
             navigator.geolocation.getCurrentPosition(
                 p => resolve({ lat: p.coords.latitude, lon: p.coords.longitude }),
-                e => reject(e.message || 'Location access denied'),
+                e => {
+                    const msgs = {
+                        1: 'Location permission denied — check your browser site settings',
+                        2: 'Location unavailable — your browser could not determine a position. Try entering coordinates manually',
+                        3: 'Location request timed out — try again or enter coordinates manually'
+                    };
+                    reject(msgs[e.code] || e.message || 'Unknown error');
+                },
                 { timeout: 15000, enableHighAccuracy: false }
             );
         });
