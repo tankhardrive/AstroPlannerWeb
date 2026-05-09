@@ -47,11 +47,11 @@
             </button>
         }
         <label class="filter-check">
-            <input type="checkbox" @bind="_visibleOnly" @bind:after="ApplyFilter" />
+            <input type="checkbox" checked="@_visibleOnly" @onchange="e => { _visibleOnly = (bool)(e.Value ?? true); ApplyFilter(); }" />
             Visible
         </label>
         <label class="filter-check">
-            <input type="checkbox" @bind="_imagedOnly" @bind:after="ApplyFilter" />
+            <input type="checkbox" checked="@_imagedOnly" @onchange="e => { _imagedOnly = (bool)(e.Value ?? false); ApplyFilter(); }" />
             Imaged only
         </label>
     </div>

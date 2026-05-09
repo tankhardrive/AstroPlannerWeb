@@ -78,6 +78,7 @@ public class YearlyStateService
             if (location == null) { IsComputing = false; return; }
 
             var site    = location.ToSite();
+            await catalogService.EnsureLoadedAsync();
             var catalog = catalogService.GetAll();
             TotalCount  = catalog.Count;
             int? bortle = location.BortleClass;

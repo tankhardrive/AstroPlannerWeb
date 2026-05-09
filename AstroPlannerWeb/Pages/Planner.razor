@@ -461,12 +461,13 @@
     private string FormatLocalTime(DateTime utc)
     {
         var location = _settings?.GetActiveLocation();
+        var fmt = _settings?.Use12HourTime == true ? "h:mm tt" : "HH:mm";
         try
         {
             var local = TimeZoneInfo.ConvertTimeFromUtc(utc, location?.GetTimeZone() ?? TimeZoneInfo.Utc);
-            return local.ToString("HH:mm");
+            return local.ToString(fmt, System.Globalization.CultureInfo.InvariantCulture);
         }
-        catch { return utc.ToString("HH:mm") + " UTC"; }
+        catch { return utc.ToString(fmt, System.Globalization.CultureInfo.InvariantCulture) + " UTC"; }
     }
 
     private static string FormatDuration(TimeSpan ts)

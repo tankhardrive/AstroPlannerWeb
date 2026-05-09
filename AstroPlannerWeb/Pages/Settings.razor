@@ -299,6 +299,15 @@
                     </select>
                 </div>
 
+                <div class="field-row">
+                    <label>Time format</label>
+                    <select value="@(_settings.Use12HourTime ? "12" : "24")"
+                            @onchange='async e => { _settings!.Use12HourTime = e.Value?.ToString() == "12"; await Save(); }'>
+                        <option value="24">24-hour (21:00)</option>
+                        <option value="12">12-hour (9:00 PM)</option>
+                    </select>
+                </div>
+
                 <div class="section-header" style="margin-top:8px">Import / Export</div>
                 <div class="import-export-row">
                     <button class="btn-secondary" @onclick="ExportSettings">Export JSON</button>

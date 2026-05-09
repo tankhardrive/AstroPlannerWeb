@@ -9,6 +9,7 @@ public class AppSettings
     public WeatherThresholds WeatherThresholds { get; set; } = new();
     public Dictionary<string, ObjectAnnotation> Annotations { get; set; } = [];
     public bool ApplySkyQualityToScore { get; set; } = false;
+    public bool Use12HourTime { get; set; } = false;
 
     public ObservationLocation GetActiveLocation()
     {
