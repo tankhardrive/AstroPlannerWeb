@@ -4,6 +4,7 @@
 @inject VisibilityService VisibilityService
 @inject PlannerStateService PlannerState
 @inject YearlyStateService YearlyState
+@inject WeatherService WeatherService
 @implements IDisposable
 
 <PageTitle>AstroPlanner</PageTitle>
@@ -76,6 +77,36 @@
             <span>Moon: @((int)_nightInfo.MoonIllum)%</span>
         }
     </div>
+
+    <!-- Weather strip -->
+    @if (_nightInfo != null && (_weatherLoading || _weatherHours.Count > 0))
+    {
+        <div class="wx-strip">
+            <span class="wx-label">Cloud:</span>
+            @if (_weatherLoading)
+            {
+                <span class="wx-fetching">fetching…</span>
+            }
+            else
+            {
+                <div class="wx-hours">
+                    @foreach (var wh in _weatherHours)
+                    {
+                        <div class="wx-hour" title="@WxTooltip(wh)">
+                            <div class="wx-block @WxCloudClass(wh.CloudCoverPercent)"></div>
+                            <div class="wx-lbl">@FormatLocalHour(wh.UtcTime)</div>
+                        </div>
+                    }
+                </div>
+                <div class="wx-legend-row">
+                    <span class="wx-dot wx-clr"></span><span>clear</span>
+                    <span class="wx-dot wx-ptly"></span><span>partly</span>
+                    <span class="wx-dot wx-mstly"></span><span>cloudy</span>
+                    <span class="wx-dot wx-ovc"></span><span>overcast</span>
+                </div>
+            }
+        </div>
+    }
 
     <!-- List header -->
     <div class="obj-list-header">
@@ -152,6 +183,9 @@
     int   _computedCount;
     int   _totalCount;
     NightInfo? _nightInfo;
+
+    List<WeatherHour> _weatherHours = [];
+    bool _weatherLoading;
 
     CancellationTokenSource? _cts;
 
@@ -243,6 +277,9 @@
             _nightInfo = night;
             _loading   = false;
             ApplyFilter();
+            var cachedLoc = _settings?.GetActiveLocation();
+            if (cachedLoc != null && _nightInfo != null)
+                _ = LoadWeatherAsync(_nightInfo, cachedLoc);
             return;
         }
 
@@ -336,6 +373,9 @@
             _ = YearlyState.EnsureComputedAsync(
                 _selectedDate.Year, _activeLocationName, _settings!, CatalogService);
 
+            // Load weather forecast for the dark window
+            _ = LoadWeatherAsync(_nightInfo!, location);
+
             _loading = false;
             ApplyFilter();
         }
@@ -346,6 +386,62 @@
             _loading = false;
             StateHasChanged();
         }
+    }
+
+    private async Task LoadWeatherAsync(NightInfo nightInfo, ObservationLocation location)
+    {
+        _weatherLoading = true;
+        StateHasChanged();
+        try
+        {
+            _weatherHours = await WeatherService.GetDarkWindowAsync(
+                location.LatitudeDegrees, location.LongitudeDegrees,
+                nightInfo.DarkStart, nightInfo.DarkEnd);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[Weather] {ex.Message}");
+            _weatherHours = [];
+        }
+        finally
+        {
+            _weatherLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private static string WxCloudClass(double? pct) => pct switch
+    {
+        null  => "wx-unknown",
+        <= 20 => "wx-clr",
+        <= 50 => "wx-ptly",
+        <= 80 => "wx-mstly",
+        _     => "wx-ovc",
+    };
+
+    private string WxTooltip(WeatherHour h)
+    {
+        var parts = new List<string>();
+        if (h.CloudCoverPercent.HasValue)       parts.Add($"Cloud: {h.CloudCoverPercent:F0}%");
+        if (h.WindSpeedMph.HasValue)            parts.Add($"Wind: {h.WindSpeedMph:F0} mph");
+        if (h.HumidityPercent.HasValue)         parts.Add($"Humidity: {h.HumidityPercent:F0}%");
+        if (h.PrecipProbabilityPercent.HasValue) parts.Add($"Precip: {h.PrecipProbabilityPercent:F0}%");
+        if (h.VisibilityMiles.HasValue)         parts.Add($"Vis: {h.VisibilityMiles:F0} mi");
+        return string.Join(" | ", parts);
+    }
+
+    private string FormatLocalHour(DateTime utc)
+    {
+        var loc = _settings?.GetActiveLocation();
+        var tz = loc?.GetTimeZone() ?? TimeZoneInfo.Utc;
+        var local = TimeZoneInfo.ConvertTimeFromUtc(utc, tz);
+        if (_settings?.Use12HourTime == true)
+        {
+            int h12 = local.Hour % 12;
+            if (h12 == 0) h12 = 12;
+            return $"{h12}{(local.Hour >= 12 ? "p" : "a")}";
+        }
+        return local.Hour.ToString("D2");
     }
 
     private void ApplyFilter()

@@ -21,5 +21,6 @@ builder.Services.AddScoped<SettingsService>();
 builder.Services.AddScoped<VisibilityService>();
 builder.Services.AddScoped<PlannerStateService>();
 builder.Services.AddScoped<YearlyStateService>();
+builder.Services.AddScoped<WeatherService>();
 
 await builder.Build().RunAsync();
