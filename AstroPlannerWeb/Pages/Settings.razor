@@ -392,6 +392,43 @@
                     </div>
                 }
 
+                <div class="section-header" style="margin-top:8px">Weather Thresholds</div>
+                <p class="field-hint">Hours exceeding any threshold show as amber (1 condition) or red (2+) in the weather bar.</p>
+                <div class="field-row-pair">
+                    <div class="field-row">
+                        <label>Max cloud %</label>
+                        <input type="number" step="5" min="0" max="100"
+                               value="@_settings.WeatherThresholds.MaxCloudCoverPercent"
+                               @onchange="async e => { _settings!.WeatherThresholds.MaxCloudCoverPercent = (int)ParseDouble(e.Value); await Save(); }" />
+                    </div>
+                    <div class="field-row">
+                        <label>Max precip chance %</label>
+                        <input type="number" step="5" min="0" max="100"
+                               value="@_settings.WeatherThresholds.MaxPrecipProbabilityPercent"
+                               @onchange="async e => { _settings!.WeatherThresholds.MaxPrecipProbabilityPercent = (int)ParseDouble(e.Value); await Save(); }" />
+                    </div>
+                </div>
+                <div class="field-row-pair">
+                    <div class="field-row">
+                        <label>Max wind mph</label>
+                        <input type="number" step="5" min="0"
+                               value="@_settings.WeatherThresholds.MaxWindSpeedMph"
+                               @onchange="async e => { _settings!.WeatherThresholds.MaxWindSpeedMph = (int)ParseDouble(e.Value); await Save(); }" />
+                    </div>
+                    <div class="field-row">
+                        <label>Max humidity %</label>
+                        <input type="number" step="5" min="0" max="100"
+                               value="@_settings.WeatherThresholds.MaxHumidityPercent"
+                               @onchange="async e => { _settings!.WeatherThresholds.MaxHumidityPercent = (int)ParseDouble(e.Value); await Save(); }" />
+                    </div>
+                </div>
+                <div class="field-row">
+                    <label>Min visibility mi</label>
+                    <input type="number" step="1" min="0"
+                           value="@_settings.WeatherThresholds.MinVisibilityMiles"
+                           @onchange="async e => { _settings!.WeatherThresholds.MinVisibilityMiles = (int)ParseDouble(e.Value); await Save(); }" />
+                </div>
+
                 <div class="section-header" style="margin-top:8px">Import / Export</div>
                 <div class="import-export-row">
                     <button class="btn-secondary" @onclick="ExportSettings">Export JSON</button>

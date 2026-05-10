@@ -93,16 +93,15 @@
                     @foreach (var wh in _weatherHours)
                     {
                         <div class="wx-hour" title="@WxTooltip(wh)">
-                            <div class="wx-block @WxCloudClass(wh.CloudCoverPercent)"></div>
+                            <div class="wx-block @WxQualityClass(wh)"></div>
                             <div class="wx-lbl">@FormatLocalHour(wh.UtcTime)</div>
                         </div>
                     }
                 </div>
                 <div class="wx-legend-row">
-                    <span class="wx-dot wx-clr"></span><span>clear</span>
-                    <span class="wx-dot wx-ptly"></span><span>partly</span>
-                    <span class="wx-dot wx-mstly"></span><span>cloudy</span>
-                    <span class="wx-dot wx-ovc"></span><span>overcast</span>
+                    <span class="wx-dot wx-good"></span><span>OK</span>
+                    <span class="wx-dot wx-marginal"></span><span>1 issue</span>
+                    <span class="wx-dot wx-bad"></span><span>2+ issues</span>
                 </div>
             }
         </div>
@@ -410,23 +409,32 @@
         }
     }
 
-    private static string WxCloudClass(double? pct) => pct switch
+    private string WxQualityClass(WeatherHour h)
     {
-        null  => "wx-unknown",
-        <= 20 => "wx-clr",
-        <= 50 => "wx-ptly",
-        <= 80 => "wx-mstly",
-        _     => "wx-ovc",
-    };
+        var t = _settings?.WeatherThresholds ?? new WeatherThresholds();
+        int v = 0;
+        if (h.CloudCoverPercent > t.MaxCloudCoverPercent)           v++;
+        if (h.WindSpeedMph > t.MaxWindSpeedMph)                     v++;
+        if (h.PrecipProbabilityPercent > t.MaxPrecipProbabilityPercent) v++;
+        if (h.HumidityPercent > t.MaxHumidityPercent)               v++;
+        if (h.VisibilityMiles.HasValue && h.VisibilityMiles < t.MinVisibilityMiles) v++;
+        return v == 0 ? "wx-good" : v == 1 ? "wx-marginal" : "wx-bad";
+    }
 
     private string WxTooltip(WeatherHour h)
     {
+        var t = _settings?.WeatherThresholds ?? new WeatherThresholds();
         var parts = new List<string>();
-        if (h.CloudCoverPercent.HasValue)       parts.Add($"Cloud: {h.CloudCoverPercent:F0}%");
-        if (h.WindSpeedMph.HasValue)            parts.Add($"Wind: {h.WindSpeedMph:F0} mph");
-        if (h.HumidityPercent.HasValue)         parts.Add($"Humidity: {h.HumidityPercent:F0}%");
-        if (h.PrecipProbabilityPercent.HasValue) parts.Add($"Precip: {h.PrecipProbabilityPercent:F0}%");
-        if (h.VisibilityMiles.HasValue)         parts.Add($"Vis: {h.VisibilityMiles:F0} mi");
+        if (h.CloudCoverPercent.HasValue)
+            parts.Add($"Cloud: {h.CloudCoverPercent:F0}%{(h.CloudCoverPercent > t.MaxCloudCoverPercent ? " ✗" : "")}");
+        if (h.WindSpeedMph.HasValue)
+            parts.Add($"Wind: {h.WindSpeedMph:F0} mph{(h.WindSpeedMph > t.MaxWindSpeedMph ? " ✗" : "")}");
+        if (h.PrecipProbabilityPercent.HasValue)
+            parts.Add($"Precip: {h.PrecipProbabilityPercent:F0}%{(h.PrecipProbabilityPercent > t.MaxPrecipProbabilityPercent ? " ✗" : "")}");
+        if (h.HumidityPercent.HasValue)
+            parts.Add($"Humidity: {h.HumidityPercent:F0}%{(h.HumidityPercent > t.MaxHumidityPercent ? " ✗" : "")}");
+        if (h.VisibilityMiles.HasValue)
+            parts.Add($"Vis: {h.VisibilityMiles:F0} mi{(h.VisibilityMiles < t.MinVisibilityMiles ? " ✗" : "")}");
         return string.Join(" | ", parts);
     }
 

@@ -279,12 +279,11 @@ main  { flex: 1; min-height: 0; display: flex; flex-direction: column; }
     line-height: 1;
 }
 
-/* Cloud cover tiers */
-.wx-clr     { background: #163d18; }
-.wx-ptly    { background: #3a3a0a; }
-.wx-mstly   { background: #3d210a; }
-.wx-ovc     { background: #3d0a0a; }
-.wx-unknown { background: #1e1e2e; }
+/* Weather quality tiers (threshold-based) */
+.wx-good     { background: #163d18; }
+.wx-marginal { background: #3d3510; }
+.wx-bad      { background: #3d0c0c; }
+.wx-unknown  { background: #1e1e2e; }
 
 /* Legend */
 .wx-legend-row {
@@ -1119,6 +1118,13 @@ main  { flex: 1; min-height: 0; display: flex; flex-direction: column; }
     border-bottom: 1px solid #1e1e3a;
     padding-bottom: 3px;
     margin-top: 2px;
+}
+
+.field-hint {
+    font-size: 0.72rem;
+    color: #4a4a70;
+    margin: 2px 0 6px;
+    line-height: 1.3;
 }
 
 /* Horizon chart */
